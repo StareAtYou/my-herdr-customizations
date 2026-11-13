@@ -1,0 +1,94 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" SessionStart",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" UserPromptSubmit",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt|elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" Notification",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "ElicitationResult": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" ElicitationResult",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" PostToolUse",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" PostToolUseFailure",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" Stop",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" SessionEnd",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

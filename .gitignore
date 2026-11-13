@@ -1,0 +1,6 @@
+/local/
+/backups/
+*.error
+*.sock
+/app/mods/*/gpui-kit.d.ts
+/app/mods/*/jsconfig.json

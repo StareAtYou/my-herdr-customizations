@@ -1,0 +1,54 @@
+{
+  "programs": {
+    "codex": {
+      "run": [
+        "{codex}",
+        "--no-daemon"
+      ]
+    },
+    "codebuddy-code": {
+      "name": "CodeBuddy Code",
+      "icon": "my-icons/codebuddy-code.png",
+      "tint": false,
+      "match": [
+        "codebuddy"
+      ],
+      "run": [
+        "{node}",
+        "{appHome}/launchers/agent-status/bridge.cjs",
+        "codebuddy-code",
+        "{node}",
+        "{codebuddy}",
+        "--settings",
+        "{appHome}/launchers/agent-status/codebuddy-hooks.json"
+      ]
+    },
+    "opencode": {
+      "run": [
+        "{opencode}"
+      ]
+    },
+    "pi": {
+      "run": [
+        "{node}",
+        "{pi}"
+      ]
+    },
+    "dsh-tui": {
+      "name": "DeepSeek Harness",
+      "run": [
+        "{node}",
+        "{dsh}",
+        "--profile",
+        "dsh-tui",
+        "--patch",
+        "{appHome}/launchers/dsh-tui.yml"
+      ]
+    },
+    "qoder": {
+      "run": [
+        "{appHome}/launchers/agent-status/qoder.ps1"
+      ]
+    }
+  }
+}

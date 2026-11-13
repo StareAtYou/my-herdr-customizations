@@ -1,0 +1,27 @@
+--- a/defaults/layouts/main.json
++++ b/defaults/layouts/main.json
+@@ -1,5 +1,6 @@
+ {
+   "id": "root",
++  "cloned_from": { "name": "main", "version": "0.1.15" },
+   "type": "row",
+   "titlebar": "none",
+   "traffic_lights": [
+@@ -50,7 +51,7 @@
+               },
+               "min": 90,
+               "content": {
+-                "mod": "spaces"
++                "mod": "spaces-with-folder-picker"
+               }
+             },
+             {
+@@ -94,7 +95,7 @@
+           },
+           "window_drag": true,
+           "content": {
+-            "mod": "tabs"
++            "mod": "tabs-with-folder-picker"
+           }
+         },
+         {

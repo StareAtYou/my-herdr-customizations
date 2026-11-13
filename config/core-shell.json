@@ -1,0 +1,6 @@
+[
+  "{pwsh}",
+  "-NoExit",
+  "-Command",
+  "$global:__hc_prompt = $function:prompt; function global:prompt { $p = & $global:__hc_prompt; $l = $ExecutionContext.SessionState.Path.CurrentLocation; if ($l.Provider.Name -eq 'FileSystem') { try { [Environment]::CurrentDirectory = $l.ProviderPath } catch {} }; $p }"
+]
