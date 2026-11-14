@@ -16,6 +16,10 @@ const key = () => JSON.stringify(location());
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 const PER_FOLDER = 500, TOTAL = 5000;
 const generated = new Set(["node_modules", "dist", "build", "coverage", "test-results", ".next", "__pycache__", ".venv"]);
+const normalizedPath = path => {
+  const normalized = path.replace(/\/$/, "");
+  return /^(?:[A-Za-z]:|\\\\)/.test(path) ? normalized.replace(/\\/g, "/").replace(/\/$/, "") : normalized;
+};
 const hiddenPath = path => path.split("/").some(part => generated.has(part));
 
 async function directory(path, on) {
@@ -94,7 +98,7 @@ export default class Files extends View {
           const status = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"], { cwd, on }).catch(() => null);
           if (status?.code === 0) for (const entry of status.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
             const xy = entry.slice(0, 2);
-            marks[`${top.stdout.trim()}/${entry.slice(3)}`] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
+            marks[`${normalizedPath(top.stdout.trim())}/${entry.slice(3)}`] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
           }
         }
         if (!this.current(context)) return;
@@ -149,7 +153,7 @@ export default class Files extends View {
     if (out.length >= TOTAL || depth > 40) return out;
     for (const entry of this.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break;
-      const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${normalizedPath(this.root)}/${path}`];
       if (this.hideGenerated && hiddenPath(path)) continue;
       out.push(h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover)).active(s => s.opacity(0.78))
         .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : this.show(path, cx))
@@ -165,7 +169,7 @@ export default class Files extends View {
   results(t, query) {
     const inventory = this.inventory ?? [...this.entries].flatMap(([folder, entries]) =>
       entries.filter(entry => !entry.dir).map(entry => folder ? folder + "/" + entry.name : entry.name));
-    const prefix = this.root + "/";
+    const prefix = normalizedPath(this.root ?? "") + "/";
     const changed = Object.keys(this.marks).filter(path => path.startsWith(prefix)).map(path => path.slice(prefix.length));
     const candidates = this.modifiedOnly ? changed : [...new Set([...inventory, ...changed])];
     return candidates.filter(path => (!this.hideGenerated || !hiddenPath(path)) && path.toLowerCase().includes(query))
