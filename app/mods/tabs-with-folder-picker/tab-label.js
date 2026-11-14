@@ -5,6 +5,7 @@ export function folderKey(folder) {
 }
 
 function projectName(space, pane, userHome, projectFolders, repo) {
+  if (space?.ssh) return space.name;
   const root = folderKey(space?.folder);
   if (!root || root === "~" || (!space.machine && root === folderKey(userHome))) return null;
   if (repo || (!space.machine && projectFolders.some(path => folderKey(path) === root))) return space.name;
@@ -27,6 +28,6 @@ export function tabLabel(tab, space, pane, userHome, projectFolders = [], repo =
   const project = projectName(space, pane, userHome, projectFolders, repo);
   const label = project && tab.named && tabName && tabName !== native ? tabName : native;
   const detail = project && project !== label ? project : null;
-  const tooltip = [...new Set([label, detail, project ? native : null, project ? space.folder : null].filter(Boolean))].join(" · ");
+  const tooltip = [...new Set([label, detail, project ? native : null, project ? (space.ssh ? `${space.ssh.host}:${space.ssh.folder}` : space.folder) : null].filter(Boolean))].join(" · ");
   return { label, detail, tooltip };
 }

@@ -4,6 +4,7 @@ import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, setting
 
 function location() {
   const space = spaces().find((s) => s.active), f = focused();
+  if (space?.ssh) return { ssh: true, space: space.id };
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
   return { cwd: pane?.cwd || f?.cwd || space?.folder, on };
@@ -305,7 +306,7 @@ export default class Changes extends View {
           .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().max_w(260).min_w(0).truncate().child(name)))
           .when(f.staged, e => e.child(div().text_size(10).text_color(t.accent).child("Staged")))
           .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`))).when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));
-      })).when(!visible.length, (e) => e.child(div().p(8).text_color(t.dim).child(this.error || (this.loading ? "Loading changes…" : query ? "No matching files" : this.root ? "No uncommitted changes" : "No folder")))))
+      })).when(!visible.length, (e) => e.child(div().p(8).text_color(t.dim).child(this.error || (location().ssh ? "Use Git in the project terminal for SSH changes." : this.loading ? "Loading changes…" : query ? "No matching files" : this.root ? "No uncommitted changes" : "No folder")))))
         .child(Scrollbar.vertical("changes-list").absolute().inset_0())))
       .when(this.limited, el => el.child(div().px(12).py(4).text_size(11).text_color(t.dim).child("Showing the first 1,000 changed files")))
       .when(Boolean(opened), el => el.child(h_flex().id("diff-mode").h(26).px(10).gap(9).flex_none().items_center().text_size(11)

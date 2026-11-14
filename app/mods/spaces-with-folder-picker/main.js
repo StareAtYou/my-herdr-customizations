@@ -8,10 +8,8 @@ import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 
 function newSpace(machine) {
-  if (machine) {
-    run("space.new", { machine });
-  } else if (machine === "") {
-    openOverlay({ mod: "choose-workspace-folder", kind: "dialog", width: 390, props: { machine: "" } });
+  if (machine !== undefined) {
+    openOverlay({ mod: "choose-workspace-folder", kind: "dialog", width: 440, props: { machine } });
   } else {
     run("mod.open", { name: "choose-workspace-folder" });
   }
@@ -38,7 +36,7 @@ function place(s, ps) {
 const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const RAIL_CELL = 32;
 const railCell = (el) => h_flex().flex_none().justify_center().child(el);
-const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
+const where = (s, ps) => JSON.stringify([s.machine ?? null, s.ssh ? null : place(s, ps)]);
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
@@ -257,7 +255,7 @@ export default class Spaces extends View {
 
   menu(w) {
     // A popup is as tall as its items; height is only the most.
-    openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: w.id } } });
+    openOverlay({ mod: "new-menu-with-folder-picker", kind: "popup", width: 295, height: 512, props: { project: w.id } });
   }
 
   orderingDue(now) {
@@ -472,7 +470,9 @@ export default class Spaces extends View {
           .items_center()
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
           .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
-          .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).tooltip(w.folder ? `${w.name} · ${w.folder}` : w.name).child(w.name))
+          .child(div().flex_1().min_w(0).truncate().text_color(t.foreground)
+            .tooltip(w.ssh ? `${w.name} · ${w.ssh.host}:${w.ssh.folder}` : w.folder ? `${w.name} · ${w.folder}` : w.name).child(w.name))
+          .when(Boolean(w.ssh), el => el.child(div().flex_none().text_color(t.muted).text_size(10).child("SSH")))
           .when(Boolean(git), el => el.child(git))
           .when(blocked > 0, el => el.child(div().flex_none().px(5).rounded(4).bg(t.blocked + "26").text_color(t.blocked).text_size(10).tooltip(`${blocked} need you`).child(String(blocked))))
           .when(sessions.length > 0, el => el.child(div().id(`expand-${w.id}`).w(20).h(20).flex_none().rounded(4).flex().items_center().justify_center()

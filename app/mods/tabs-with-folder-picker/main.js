@@ -50,7 +50,7 @@ export default class Tabs extends View {
 
   inspectProject(space, cx) {
     const folder = folderKey(space?.folder);
-    if (!folder || folder === "~" || (!space.machine && folder === folderKey(home()))) return false;
+    if (space?.ssh || !folder || folder === "~" || (!space.machine && folder === folderKey(home()))) return false;
     const key = JSON.stringify([space.machine, folder]);
     if (!this.projects.has(key)) {
       this.projects.set(key, false);
@@ -148,7 +148,6 @@ export default class Tabs extends View {
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu-with-folder-picker", kind: "popup", width: 250, height: 512 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
-      .when(enabled.includes("tasks"), el => el.child(panelButton("tasks", "Tasks", "icons/shell.svg")))
       .child(button("workspace-actions", svg("mods/workspace-chrome/search.svg").size(15), () =>
         run("mod.open", { name: "workspace-actions" })).tooltip("Workspace commands"))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-with-folder-picker/win-min.svg").size(16) : "−", () => run("window.minimize")))

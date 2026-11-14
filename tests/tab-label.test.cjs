@@ -33,6 +33,13 @@ test("an explicitly selected Windows folder can be a project without Git", () =>
   assert.equal(tabLabel(tab, space, agent, "C:\\Home", ["c:/projects/demo/"]).detail, "Demo");
 });
 
+test("SSH project labels use the remote root even when the local terminal starts at home", () => {
+  const space = { folder: home, name: "Demo", ssh: { host: "dev-server", folder: "/srv/demo" } };
+  assert.deepEqual(tabLabel(tab, space, agent, home), {
+    label: "CodeBuddy Code", detail: "Demo", tooltip: "CodeBuddy Code · Demo · dev-server:/srv/demo",
+  });
+});
+
 test("non-agent labels retain their names", () => {
   assert.equal(tabLabel({ name: "Logs", named: true }, null, { program: { name: "Shell" } }, home).label, "Logs");
 });

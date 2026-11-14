@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, Input, InputState } from "gpui-base";
-import { agents, spaces, layout, theme, run, props, closeOverlay, openOverlay } from "herdr";
+import { agents, spaces, theme, run, props, closeOverlay, openOverlay } from "herdr";
 
 export default class WorkspaceCommands extends View {
   init(_props, cx) {
@@ -13,16 +13,11 @@ export default class WorkspaceCommands extends View {
 
   items() {
     const active = spaces().find(space => space.active);
-    const panel = layout()?.children?.find(node => node.id === "work")?.children?.find(node => node.id === "work-body")?.children?.find(node => node.id === "panel");
     const items = [
       ["Workspace appearance", () => run("app.settings", { section: "look" })],
       ["All Herdr commands", () => run("app.palette")],
     ];
-    if (panel) items.unshift(["Open tasks and logs", () => {
-      run("layout.select", { stack: "panel-body", child: "tasks" });
-      run("layout.show", { id: "panel" });
-    }]);
-    if (active?.folder) items.unshift(["Switch Git worktree…", () => openOverlay({
+    if (active?.folder && !active.ssh) items.unshift(["Switch Git worktree…", () => openOverlay({
       kind: "dialog", mod: "worktree", width: 560, height: 480,
       props: { space: active.id, folder: active.folder, action: "open" },
     })]);

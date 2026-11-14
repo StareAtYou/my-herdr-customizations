@@ -7,6 +7,7 @@ git checkout v0.1.15
 git submodule update --init --recursive
 git apply /path/to/my-herdr-customizations/platforms/macos/native/desktop-glass-v0.1.15.patch
 /path/to/my-herdr-customizations/desktop/look/apply.sh macos "$PWD"
+git apply /path/to/my-herdr-customizations/desktop/projects/ssh-projects-v0.1.15.patch
 cargo build --locked
 ```
 

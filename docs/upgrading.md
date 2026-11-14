@@ -7,7 +7,7 @@
 | Herdr App | [v0.1.15](https://github.com/herdrdev/herdr-app/tree/v0.1.15) | 9950887361af3ba218b9ce7a347cb8ec7b66c71d |
 | Herdr Core | [v0.1.21](https://github.com/herdrdev/herdr-core/tree/v0.1.21) | 1b0393f80c35b1dae34f37934d33d0144a8fc8d7 |
 
-本仓库的 App 文件适用于官方二进制安装，升级时无需重新编译 Herdr。以仓库里的 app/ 作为可恢复快照，以 patches/ 作为对比上游的改动记录。
+共享布局和 Mod 可用于官方二进制。原生 Settings 外观、SSH 项目和 macOS 毛玻璃需要应用各自的补丁后重新构建桌面版。以 `app/` 作为可恢复快照，以 `patches/` 作为与上游的改动记录。
 
 ## 适配新版本
 
@@ -29,6 +29,7 @@
 
 - 从 **Spaces +**、新建标签菜单和 Ctrl+Shift+N 分别打开目录选择器。打开一个含空格或中文的测试目录，确认 Files 指向所选根目录。
 - 在两个测试工作区各启动 AI CLI，确认每个会话显示在正确的 Spaces 条目下，且可从 Agents 或 Spaces 跳转。
+- 右键未选中的项目，新建终端和 Agent，确认标签属于该项目且工作目录是项目根目录。对 SSH 项目检查终端与 Agent 均连接目标主机，并从远端项目根目录启动。
 - 检查 CodeBuddy 图标，验证状态随提交提示、等待批准和结束响应变化。验证 Qoder 状态上报，以及 DeepSeek TUI 连续发送两轮提示。
 - 开一个新的 Herdr 终端，运行 [Environment]::Is64BitProcess，确认返回 True。切换目录后检查 [Environment]::CurrentDirectory。
 - 在 App 的终端里运行 herdr-app status，检查布局、按键、程序配置和 Mod 的加载错误。

@@ -1,5 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
+import * as api from "herdr";
 import { theme, spaces, panes, knownAgents, run, openOverlay, closeOverlay, props, window, keys, shared, setShared } from "herdr";
 
 // The last agents each machine reported, shown at once while knownAgents() checks again.
@@ -24,16 +25,18 @@ function shortcut(name) {
 
 export default class NewMenu extends View {
   init(_props, cx) {
-    this.space = spaces().find(s => s.active);
+    const target = props()?.project;
+    this.projectMenu = Boolean(target);
+    this.space = target ? spaces().find(s => s.id === target) : spaces().find(s => s.active);
     this.machine = this.space?.machine;
     this.where = this.machine ?? "";
-    this.agents = shared(KNOWN)?.[this.where] ?? [];
+    this.agents = this.space?.ssh ? (api.sshAgents?.() ?? []).map(a => ({ ...a, installed: true })) : shared(KNOWN)?.[this.where] ?? [];
     this.handle = cx.focus_handle();
     this.handle.focus();
     if (!shared("workspace.reduce-motion")) cx.timer.after(30, cx => { this.ready = true; cx.notify(); });
     this.cursor = "terminal";
     this.scroll = ScrollHandle.new();
-    this.probe(cx);
+    if (!this.space?.ssh) this.probe(cx);
   }
 
   probe(cx) {
@@ -61,21 +64,28 @@ export default class NewMenu extends View {
   render() {
     const t = theme(), space = this.space, motion = !shared("workspace.reduce-motion");
     const installed = this.agents.filter(a => a.installed);
+    const projectRoot = this.projectMenu && !space?.ssh ? space?.folder : undefined;
+    const tabArgs = { space: space?.id, folder: projectRoot || undefined };
     const agentRows = [...installed, ...this.agents.filter(a => !a.installed).slice(0, 2)].map((a, i) => ({
       id: `agent-${a.key}`, title: a.name, enabled: a.installed,
-      icon: a.tint ? svg(a.icon).size(14).text_color(t.foreground) : image(a.icon).size(14),
+      icon: a.icon ? (a.tint ? svg(a.icon).size(14).text_color(t.foreground) : image(a.icon).size(14)) : svg("icons/agent.svg").size(14),
       hint: !a.installed ? "Missing" : i < 9 ? String(i + 1) : "",
-      action: () => run("tab.new", { name: a.name, space: space?.id, argv: a.run }),
+      action: () => run("tab.new", { ...tabArgs, name: a.name, ...(space?.ssh ? { agent: a.key } : { argv: a.run }) }),
     }));
     const worktree = (title, action) => ({ id: `worktree-${action}`, title, enabled: Boolean(space),
       icon: svg("mods/workspace-chrome/branch.svg").size(14), action: () => openOverlay({ mod: "worktree", kind: "dialog", width: action === "new" ? 460 : 560, height: action === "new" ? 280 : 480, props: { space: space?.id, folder: panes().find(p => p.focused)?.cwd, action } }) });
-    const terminal = { id: "terminal", title: "Terminal", icon: svg("icons/shell.svg").size(14), hint: shortcut("tab.new"), action: () => run("tab.new", { space: space?.id }) };
-    const footer = [
-      { id: "space", title: space?.machine ? "New space" : "New space…", icon: div().w(14).child("+"), hint: shortcut("mod.open:choose-workspace-folder"), action: () => run("mod.open", { name: "choose-workspace-folder" }) },
-      worktree("New worktree…", "new"), worktree("Open worktree…", "open"),
+    const terminal = { id: "terminal", title: "Terminal", icon: svg("icons/shell.svg").size(14), hint: shortcut("tab.new"), action: () => run("tab.new", tabArgs) };
+    const footer = this.projectMenu ? [
+      { id: "project-options", title: "Project options…", icon: svg("mods/workspace-chrome/settings.svg").size(14),
+        action: () => openOverlay({ mod: "menu", kind: "popup", width: 220, height: 260, props: { tab: "space", target: { id: space.id } } }) },
+    ] : [
+      { id: "space", title: "New project…", icon: div().w(14).child("+"), hint: shortcut("mod.open:choose-workspace-folder"), action: () => run("mod.open", { name: "choose-workspace-folder" }) },
+      ...(space?.ssh ? [] : [worktree("New worktree…", "new"), worktree("Open worktree…", "open")]),
     ];
+    if (this.projectMenu && !space) return div().p(10).child("Project is no longer open.");
     const retry = { id: "retry", title: "Retry detection", hint: "", icon: div().w(14).child("↻") };
     const navigable = [terminal, ...agentRows, ...(this.error ? [retry] : []), ...footer].filter(r => r.enabled !== false);
+    const location = space?.ssh ? `${space.ssh.host}:${space.ssh.folder}` : space?.folder;
     const row = r => h_flex().id(r.id).h(29).px(7).gap(8).rounded(6).items_center().flex_none()
       .bg(this.cursor === r.id ? t.selected : t.popover).text_color(r.enabled === false ? t.dim : t.foreground)
       .when(r.enabled !== false, el => el.cursor_pointer().hover(s => s.bg(t.hover)).active(s => s.opacity(0.78)).on_click((_e, cx) => this.launch(r, cx)))
@@ -99,11 +109,12 @@ export default class NewMenu extends View {
         const item = e.key === "enter" ? navigable[current] : /^[1-9]$/.test(e.key) ? agentRows[Number(e.key) - 1] : null;
         if (item) { cx.stop_propagation(); this.launch(item, cx); }
       })
-      .child(div().px(8).py(5).text_size(11).text_color(t.muted).truncate().tooltip(space?.folder ?? "Local")
-        .child(space ? `${space.name}${this.machine ? ` · ${this.machine}` : ""}` : "This computer"))
+      .child(div().px(8).py(5).text_size(11).text_color(t.muted).truncate().tooltip(location || "Local")
+        .child(space ? `${space.name}${space.ssh ? " · SSH" : this.machine ? ` · ${this.machine}` : ""}` : "This computer"))
+      .when(this.projectMenu && Boolean(location), el => el.child(div().px(8).text_size(11).text_color(t.dim).truncate().tooltip(location).child(location)))
       .child(row(terminal))
       .child(h_flex().px(8).pt(5).pb(2).gap(6).items_center().text_size(11).text_color(t.muted)
-        .child(this.loading ? "Checking agents…" : this.error ? "Detection unavailable" : installed.length ? "Start an agent" : "No installed agents"))
+        .child(this.loading ? "Checking agents…" : this.error ? "Detection unavailable" : installed.length ? (space?.ssh ? "Start an agent over SSH" : "Start an agent") : "No installed agents"))
       .child(v_flex().id("launchers").max_h(240).overflow_y_scrollbar().track_scroll(this.scroll).children(agentRows.map(row)))
       .when(this.error, el => el.child(row(retry)))
       .child(div().h(1).mx(4).my(4).bg(t.border))

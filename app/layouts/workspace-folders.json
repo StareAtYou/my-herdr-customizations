@@ -164,13 +164,6 @@
                       "content": {
                         "mod": "changes-safe"
                       }
-                    },
-                    {
-                      "id": "tasks",
-                      "type": "block",
-                      "content": {
-                        "mod": "tasks-workspace"
-                      }
                     }
                   ]
                 }

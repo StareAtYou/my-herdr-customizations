@@ -8,6 +8,7 @@ import { windowsDirectory } from "./directory-windows.js";
 
 function location() {
   const space = spaces().find(s => s.active), f = focused();
+  if (space?.ssh) return { ssh: true, space: space.id };
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
   return { cwd: pane?.cwd || f?.cwd || space?.folder, on, space: space?.id };
@@ -209,7 +210,7 @@ export default class Files extends View {
         .child(toggle("only-changed", "Changed", this.modifiedOnly, (_e, cx) => { this.modifiedOnly = !this.modifiedOnly; cx.notify(); }))
         .child(toggle("hide-generated", this.hideGenerated ? "Show build files" : "Hide build files", false, (_e, cx) => { this.hideGenerated = !this.hideGenerated; cx.notify(); }))))
       .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(results)
-        .when(Boolean(this.error) || !results.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : searching ? "No matching files" : this.root ? "No files" : "No folder"))))
+        .when(Boolean(this.error) || !results.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (location().ssh ? "Use the project terminal to browse SSH files." : this.loading ? "Loading files…" : searching ? "No matching files" : this.root ? "No files" : "No folder"))))
         .when(searching && Boolean(query) && this.inventory === null && !this.loading, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("Search covers loaded folders")))
         .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))
       .when(Boolean(this.file), el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));

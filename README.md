@@ -43,7 +43,7 @@ herdr-app do layout.switch --name workspace-folders
 
 | 定制 | 行为 |
 | --- | --- |
-| 工作区文件夹选择 | Spaces 的新增按钮、新建标签菜单和 Ctrl+Shift+N 打开本机文件夹选择器。所选文件夹作为新工作区根目录，Files 跟随活动工作区。远程机器保留其默认新建流程。 |
+| 项目路径 | 从 Spaces 的新增按钮、新建标签菜单或新建项目快捷键打开项目选择器。可选本地目录或通过 SSH 打开远端目录。右键项目可在该项目下直接新建终端或 Agent。 |
 | Spaces 中的 AI 会话 | 按 Herdr 提供的 agent.space 将已识别会话挂到对应工作区。点击可定位相应终端。 |
 | AI 一键菜单 | Codex、CodeBuddy Code、OpenCode、Pi、DeepSeek Harness、Qoder。恢复时从已安装的 CodeBuddy npm 包获取图标，DeepSeek 走交互式 TUI。 |
 | Agents 状态 | CodeBuddy 通过生命周期 hooks 和 OSC 状态桥接上报。Qoder 启动时启用自己的状态上报。其余入口使用 CLI 和 Herdr 已提供的状态能力。 |
@@ -56,15 +56,13 @@ herdr-app do layout.switch --name workspace-folders
 - 桌面定制版在 **Settings → Look → Workspace appearance** 中提供外观设置。可预览纯色、渐变、图片和紧凑侧栏。输入本地图片的绝对路径后点 Import。导入的图片保存在本机 Herdr 配置目录的 `backgrounds/` 中。
 - Changes 支持按路径筛选、暂存分组和展开 Diff。筛选只影响视图，提交范围仍由暂存状态或明确确认的全部文件决定。
 - Files 支持文件名搜索、仅显示变更和隐藏常见构建目录。在 Git 项目中搜索索引和未忽略文件，在其他目录中搜索已加载的文件夹。
-- Tasks 显示项目任务、退出码和最近输出。没有 `.herdr/tasks.json` 时读取 `package.json` 的 `dev`、`test` 和 `build`。自定义任务以命令及参数数组声明，点击后才运行。配置示例见下方。
-- 标签栏搜索图标打开工作区命令，可进入 Tasks、选择 Git worktree，或跳到需要处理的 Agent。
+- 标签栏搜索图标打开工作区命令，可选择 Git worktree 或跳到需要处理的 Agent。
 
-```json
-{
-  "check": ["node", "--test"],
-  "build": ["cargo", "build"]
-}
-```
+## SSH 项目
+
+需要应用 [SSH 项目源码补丁](desktop/projects/README.md) 的桌面版。在 **Spaces → + → Remote** 填写 SSH 别名、主机名或 `user@host`，以及远端绝对目录。目录尚未创建时可选 **Create directory if missing**。端口、跳板、密钥等沿用本机 OpenSSH 配置。
+
+本机 Herdr Core 托管终端和标签。远端的交互式 Shell 和 Agent CLI 从项目根目录运行。Agent CLI 需安装在远端并完成登录，菜单列出可启动的 CLI 类型。SSH 项目的文件和 Git 操作可在项目终端中执行。
 
 ## 维护与回滚
 

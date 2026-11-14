@@ -1,0 +1,481 @@
+diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
+index 9cd5799..d1ed004 100644
+--- a/defaults/AGENTS.md
++++ b/defaults/AGENTS.md
+@@ -545,7 +545,7 @@ Target IDs (`id`, `pane`, `space`, `terminal`) must be strings. Other non-null
+ types are rejected before a current-target default applies; null means omitted.
+ The main ones:
+
+-- Spaces: `space.new {name?, folder?, tab?, argv?, task?, machine?}`
++- Spaces: `space.new {name?, folder?, tab?, argv?, task?, machine?, ssh?}`
+   (machine: another machine from `hc machine ls`; omitted: the focused space's
+   machine for keys and clicks, this computer for scripts; `""`: this computer.
+   The space lives there, its
+@@ -554,11 +554,16 @@ The main ones:
+   `space.close {id?, confirmed?}`, `space.rename {id?, name}` ("": Herdr's name again),
+   `space.move {id, index}`, `space.select {index | id}`, `space.next`, `space.prev`.
+   With no `argv`, the target core chooses that machine's default shell (PowerShell 7 when available on Windows).
+-- Tabs: `tab.new {name?, space?, folder?, argv?, task?}` (argv: an
++  `ssh: {host, folder, create?}` creates a local Space that uses the local
++  OpenSSH client to access an absolute POSIX project path. Its tabs and splits
++  open on the SSH host; `space.ssh` gives its destination and root path.
++- Tabs: `tab.new {name?, space?, folder?, argv?, task?, agent?}` (argv: an
+   agent to run, task: its first message). Agents run in your interactive
+   shell (including fish), which stays open after the agent exits. A terminal
+   that exits with a nonzero code within two seconds of launch shows an error
+-  toast with its exit code and last output lines. Or `tab.new {name?, space?, mod,
++  toast with its exit code and last output lines. In an SSH Space, use `agent`
++  (from `sshAgents()`) to start a supported CLI installed on the SSH host.
++  Or `tab.new {name?, space?, mod,
+   props?}` for a tab whose only pane is a mod (a file, a board; split a shell
+   in beside it like any tab), `tab.close {id?, confirmed?}` (closing the last tab
+   closes its space and asks first unless confirmed),
+diff --git a/defaults/herdr.d.ts b/defaults/herdr.d.ts
+index c30dcd6..5066280 100644
+--- a/defaults/herdr.d.ts
++++ b/defaults/herdr.d.ts
+@@ -34,6 +34,9 @@ export function writeTextFile(path: string, text: string, expected: string | nul
+  *  Rejects if the check fails; failed checks are not cached. Start one with its `run` as `argv`. */
+ export function knownAgents(options?: { on?: string | null }): Promise<(Program & { run: string[]; installed: boolean })[]>;
+
++/** Agent presets for SSH projects. Their CLI must be installed on the SSH host. */
++export function sshAgents(): Program[];
++
+ /** Opens the system's folder picker (this machine). Resolves with the chosen folder, or null
+  *  when the person cancels. `prompt`: the confirm button's text (default "Open"). */
+ export function pickFolder(options?: { prompt?: string }): Promise<string | null>;
+@@ -49,9 +52,9 @@ export function playSound(sound: string): null;
+  * the call returns; terminal.keep/park finish in the background and toast on failure.
+  * A rename without a name is asked for;
+  * "" gives the space or tab Herdr's automatic name again. The main ones:
+- * Spaces: space.new {name?, folder?, tab?, argv?, task?, machine?}, space.close {id?}, space.rename {id?, name},
++ * Spaces: space.new {name?, folder?, tab?, argv?, task?, machine?, ssh?}, space.close {id?}, space.rename {id?, name},
+  *   space.move {id, index}, space.select {index | id}, space.next, space.prev.
+- * Tabs: tab.new {name?, space?, folder?, argv?, task?} (argv: an agent, task: its first message)
++ * Tabs: tab.new {name?, space?, folder?, argv?, task?, agent?} (argv: an agent, task: its first message)
+  *   or {name?, space?, mod, props?} (a tab whose only pane is a mod),
+  *   tab.close {id?}, tab.rename {id?, name}, tab.move {id, index}, tab.select {index | id},
+  *   tab.next, tab.prev.
+@@ -111,6 +114,8 @@ export interface TabInfo {
+ }
+
+ export interface SpaceInfo {
++  /** Local SSH project. The terminal runs an SSH connection to this POSIX directory. */
++  ssh?: { host: string; folder: string } | null;
+   id: string;
+   index: number;
+   /** Its name, or where its first terminal is now (repo, else folder, "~" at home)
+diff --git a/defaults/mods/menu/main.js b/defaults/mods/menu/main.js
+index d1fb80c..141ee68 100644
+--- a/defaults/mods/menu/main.js
++++ b/defaults/mods/menu/main.js
+@@ -100,7 +100,7 @@ export default class Menu extends View {
+     this.handle.focus();
+     const p = props();
+     const space = p?.tab === "space" && spaces().find((s) => s.id === p.target?.id);
+-    const folder = space && place(space);
++    const folder = space && !space.ssh && place(space);
+     if (folder)
+       cx.spawn(async (cx) => {
+         this.git = await checkout(folder, space.machine).catch(() => null);
+diff --git a/src/SKILL.md b/src/SKILL.md
+index 2a8ba25..3477ef3 100644
+--- a/src/SKILL.md
++++ b/src/SKILL.md
+@@ -49,6 +49,12 @@ without `--machine` still use this computer; `--machine ''` explicitly chooses i
+ The agent menu checks and starts agents in the remote Unix user's
+ login/interactive shell (sh, bash, zsh, dash, ksh or fish), including its
+ configured PATH. Other shells keep the sh launcher.
++
++To host a Space on this computer and work in a remote project over OpenSSH,
++use `space.new --ssh '{"host":"server-alias","folder":"/srv/api"}'`.
++In that Space use `tab.new --space <space-id> --agent codex` for a CLI
++available on the SSH host, or omit `--agent` for an interactive shell.
++
+ `terminal.open --folder /path --place down` starts the split in that folder,
+ including when `--argv` supplies a program. Without `--folder`, it follows the
+ focused terminal's folder. If an inherited local folder was deleted, new spaces,
+diff --git a/src/commands.rs b/src/commands.rs
+index 5350999..ef504ec 100644
+--- a/src/commands.rs
++++ b/src/commands.rs
+@@ -29,13 +29,13 @@ const fn cmd(name: &'static str, args: &'static [Arg], about: &'static str) -> C
+
+ pub const COMMANDS: &[Command] = &[
+     // What exists.
+-    cmd("space.new", &[opt("name"), opt("folder"), opt("tab"), opt("argv"), opt("task"), opt("machine")],
+-        "Make a space: its name (default: none, so it's called after where its first terminal is), the folder its terminals start in (default: the focused terminal's), its first tab's name (default: none, so it's called by its number), optionally an agent (argv) and its first message (task), and the machine it lives on (`hc machine ls`; default the focused space's machine for keys and clicks, this computer for scripts; empty string: this computer; its terminals start in that machine's home unless folder)."),
++    cmd("space.new", &[opt("name"), opt("folder"), opt("tab"), opt("argv"), opt("task"), opt("machine"), opt("ssh")],
++        "Make a space: its name (default: after its first terminal's folder), the folder its terminals start in, its first tab's name, optionally an agent (argv) and first message (task), and the machine it lives on (`hc machine ls`; empty machine chooses this computer). Supply `ssh: {host, folder, create?}` for a local Space whose terminals open in an absolute project path over SSH."),
+     cmd("space.close", &[opt("id"), opt("confirmed")], "Close a space and end its terminals (asks first unless confirmed)."),
+     cmd("space.rename", &[opt("id"), opt("name")], "Rename a space (asks the person when no name; an empty name: called after where its first terminal is again)."),
+     cmd("space.move", &[req("id"), req("index")], "Move a space to a position (1 = first)."),
+-    cmd("tab.new", &[opt("name"), opt("space"), opt("folder"), opt("argv"), opt("task"), opt("mod"), opt("props")],
+-        "Make a tab in a space (default: the selected one; name default: none, so it's called by its number) with a terminal in folder (default: the focused terminal's), optionally an agent (argv) and its first message (task); or with a mod as its only pane (`mod`, its `props`: a file, a board). With no space open, a person's new tab starts a space (as space.new)."),
++    cmd("tab.new", &[opt("name"), opt("space"), opt("folder"), opt("argv"), opt("task"), opt("mod"), opt("props"), opt("agent")],
++        "Make a tab in a space (default: the selected one) with a terminal in folder (default: the focused terminal's), optionally an agent (argv) and first message (task); or with a mod as its only pane (`mod`, `props`). In an SSH Space the terminal starts at the remote project root; supply `agent` (a key from sshAgents()) to start that agent there. With no space open, a person's new tab starts a space."),
+     cmd("tab.close", &[opt("id"), opt("confirmed")], "Close a tab and end its terminals."),
+     cmd("tab.rename", &[opt("id"), opt("name")], "Rename a tab (asks the person when no name; an empty name: called by its number again)."),
+     cmd("tab.move", &[req("id"), req("index")], "Move a tab to a position in its space (1 = first)."),
+diff --git a/src/main.rs b/src/main.rs
+index 898d732..89b2464 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -29,6 +29,7 @@ mod settings;
+ mod setup;
+ mod sound;
+ mod spawn;
++mod ssh_project;
+ mod sprites;
+ mod telemetry;
+ mod feedback;
+diff --git a/src/model.rs b/src/model.rs
+index 66d40f4..a22c984 100644
+--- a/src/model.rs
++++ b/src/model.rs
+@@ -633,6 +633,7 @@ pub fn space_json(m: &Model, p: &Space, index: usize, branch: Option<&str>, home
+         "named": !p.name.is_empty(),
+         "folder": p.folder,
+         "machine": p.machine,
++        "ssh": p.rest.get("ssh"),
+         "branch": branch,
+         "active": m.active.as_deref() == Some(&p.id),
+         "status": m.rollup(&all),
+diff --git a/src/mods.rs b/src/mods.rs
+index bb74a3f..9e930ee 100644
+--- a/src/mods.rs
++++ b/src/mods.rs
+@@ -967,6 +967,18 @@ fn module(inst: Instance, copy: u64) -> HostModule {
+                 Ok(to_host(&Value::Array(out)))
+             })
+         })
++        .function("sshAgents", |_| {
++            let agents: Vec<Value> = crate::ssh_project::AGENTS.iter()
++                .map(|(key, _)| {
++                    let mut program = crate::programs::of(Some(key), &[]);
++                    program["key"] = json!(key);
++                    if *key == "codebuddy-code" && program["name"] == *key {
++                        program["name"] = json!("CodeBuddy Code");
++                    }
++                    program
++                }).collect();
++            Ok(to_host(&json!(agents)))
++        })
+         .async_function("knownAgents", |a| {
+             let on = opt_str(a.get(0), "on");
+             // The table is loaded on the window thread; workers have only defaults.
+diff --git a/src/ssh_project.rs b/src/ssh_project.rs
+new file mode 100644
+index 0000000..5186d4b
+--- /dev/null
++++ b/src/ssh_project.rs
+@@ -0,0 +1,140 @@
++//! Project paths reached by the local OpenSSH client.
++use serde_json::{Value, json};
++
++pub const AGENTS: &[(&str, &[&str])] = &[
++    ("claude", &["claude"]),
++    ("codex", &["codex", "--no-daemon"]),
++    ("codebuddy-code", &["codebuddy"]),
++    ("pi", &["pi"]),
++    ("pig", &["pig"]),
++    ("opencode", &["opencode"]),
++    ("cursor", &["cursor-agent"]),
++    ("copilot", &["copilot"]),
++    ("gemini", &["gemini"]),
++    ("qoder", &["qodercli"]),
++    ("dsh-tui", &["dsh", "--profile", "dsh-tui"]),
++    ("amp", &["amp"]),
++    ("antigravity", &["agy"]),
++    ("kimi", &["kimi"]),
++    ("kiro", &["kiro-cli"]),
++    ("hermes", &["hermes"]),
++    ("crush", &["crush"]),
++    ("grok", &["grok"]),
++];
++
++pub struct Project {
++    pub folder: String,
++    host: String,
++}
++
++impl Project {
++    pub fn parse(value: &Value) -> Result<Self, String> {
++        let host = value
++            .get("host")
++            .and_then(Value::as_str)
++            .unwrap_or("")
++            .trim();
++        if host.is_empty()
++            || host.starts_with('-')
++            || host.len() > 255
++            || !host
++                .bytes()
++                .all(|b| b.is_ascii_alphanumeric() || b"@._-:[]".contains(&b))
++        {
++            return Err("Enter an SSH config alias, hostname, or user@host".into());
++        }
++        let folder = value
++            .get("folder")
++            .and_then(Value::as_str)
++            .unwrap_or("")
++            .trim();
++        if !folder.starts_with('/') || folder.chars().any(char::is_control) {
++            return Err("Enter an absolute POSIX path on the SSH host".into());
++        }
++        Ok(Self {
++            host: host.into(),
++            folder: folder.into(),
++        })
++    }
++
++    pub fn as_json(&self) -> Value {
++        json!({ "host": self.host, "folder": self.folder })
++    }
++
++    pub fn argv(&self, command: Option<&[String]>, create: bool) -> Vec<String> {
++        let folder = quote(&self.folder);
++        let mut script = String::new();
++        if create {
++            script.push_str(&format!("mkdir -p {folder} && "));
++        }
++        script.push_str(&format!("cd {folder} && "));
++        if let Some(command) = command {
++            script.push_str("exec ");
++            let command = crate::remote_shell::launch(command.to_vec());
++            script.push_str(
++                &command
++                    .iter()
++                    .map(|arg| quote(arg))
++                    .collect::<Vec<_>>()
++                    .join(" "),
++            );
++        } else {
++            script.push_str(r#"exec "${SHELL:-/bin/sh}" -i"#);
++        }
++        let remote = format!("sh -c {}", quote(&script));
++        vec![
++            "ssh".into(),
++            "-tt".into(),
++            "--".into(),
++            self.host.clone(),
++            remote,
++        ]
++    }
++}
++
++fn quote(value: &str) -> String {
++    format!("'{}'", value.replace('\'', "'\\''"))
++}
++
++pub fn agent_command(key: &str, task: Option<&str>) -> Result<Vec<String>, String> {
++    let argv = AGENTS
++        .iter()
++        .find(|(agent, _)| *agent == key)
++        .map(|(_, argv)| *argv)
++        .ok_or_else(|| format!("No SSH launcher for agent {key:?}"))?;
++    let mut command: Vec<String> = argv.iter().map(|s| (*s).into()).collect();
++    if let Some(task) = task.filter(|task| !task.trim().is_empty()) {
++        command.push(task.into());
++    }
++    Ok(command)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[cfg(unix)]
++    #[test]
++    fn remote_argument_boundaries_are_preserved() {
++        let root = std::env::temp_dir().join(format!("herdr-ssh-{}-a ' $b", std::process::id()));
++        let p = Project::parse(&json!({"host":"user@server","folder":root})).unwrap();
++        let command = ["/usr/bin/printf", "argument=<%s>\n", "$(literal) ' x"].map(String::from);
++        let argv = p.argv(Some(&command), true);
++        assert_eq!(&argv[..4], ["ssh", "-tt", "--", "user@server"]);
++        let output = std::process::Command::new("/bin/sh")
++            .args(["-c", &argv[4]])
++            .env("SHELL", "/bin/sh")
++            .stdin(std::process::Stdio::null())
++            .output()
++            .unwrap();
++        std::fs::remove_dir(root).unwrap();
++        assert!(String::from_utf8_lossy(&output.stdout).contains("argument=<$(literal) ' x>"));
++    }
++
++    #[test]
++    fn rejects_options_and_missing_absolute_paths() {
++        assert!(Project::parse(&json!({"host":"-oBadOption","folder":"/somewhere"})).is_err());
++        assert!(Project::parse(&json!({"host":"server","folder":"relative/path"})).is_err());
++        assert!(agent_command("custom", None).is_err());
++    }
++}
+diff --git a/src/window.rs b/src/window.rs
+index 58f190a..fa7e5cc 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -1705,7 +1705,13 @@ impl AppWindow {
+     /// How a terminal shows (`program` for mods): its agent, else what it runs.
+     fn program(&self, addr: &str) -> Value {
+         let rec = self.live.get(addr).and_then(Value::as_object);
+-        program_of(rec.and_then(|r| r.get("report")).unwrap_or(&Value::Null), rec.and_then(running_argv))
++        let report = rec.and_then(|r| r.get("report")).unwrap_or(&Value::Null);
++        if report.get("app").and_then(Value::as_str).is_none()
++            && let Some(key) = rec.and_then(|r| r.get("labels")).and_then(|l| l.get("herdr.ssh-agent")).and_then(Value::as_str)
++        {
++            return crate::programs::of(Some(key), &[]);
++        }
++        program_of(report, rec.and_then(running_argv))
+     }
+
+     /// Tells mods what changed (they re-render only if something did).
+@@ -2388,9 +2394,16 @@ impl AppWindow {
+     /// empty `cwd`: the machine's home. With no argv, that machine's core
+     /// picks its own shell.
+     fn spawn(&mut self, argv: Option<Vec<String>>, cwd: String, follow: bool, space: &str, ctx: &str, on: Option<&str>, size: Option<(u16, u16)>, window: &Window) -> Result<(String, String), String> {
++        self.spawn_labeled(argv, cwd, follow, space, ctx, on, size, window, None)
++    }
++
++    fn spawn_labeled(&mut self, argv: Option<Vec<String>>, cwd: String, follow: bool, space: &str, ctx: &str, on: Option<&str>, size: Option<(u16, u16)>, window: &Window, ssh_agent: Option<&str>) -> Result<(String, String), String> {
+         let argv = argv.unwrap_or_default();
+         self.require_document(on)?;
+-        let labels = json!({ "herdr.space": crate::mirror::local(space, on), "herdr.tab": crate::mirror::local(ctx, on), "herdr.seen": "0" });
++        let mut labels = json!({ "herdr.space": crate::mirror::local(space, on), "herdr.tab": crate::mirror::local(ctx, on), "herdr.seen": "0" });
++        if let Some(agent) = ssh_agent {
++            labels["herdr.ssh-agent"] = json!(agent);
++        }
+         let (addr, cwd) = run_following_folder(cwd, follow, on, |cwd| match self.core.run(argv.clone(), cwd.clone(), labels.clone(), on, size, crate::terminal::initial_display(window)) {
+             // An agent on a machine without `sh` (Windows): in its PowerShell instead.
+             Err(e) if on.is_some() && argv.first().map(String::as_str) == Some("sh") && format!("{e:#}").contains("not found") => {
+@@ -2433,6 +2446,12 @@ impl AppWindow {
+         })
+     }
+
++    fn ssh_argv(argv: Vec<String>) -> Vec<String> {
++        // Pass the remote command directly to OpenSSH on Windows. PowerShell
++        // versions differ in how they pass embedded quotes to native programs.
++        if cfg!(windows) { argv } else { Self::agent_argv(Some(argv), None, None).unwrap_or_default() }
++    }
++
+     /// A space with its first tab and terminal, shown at once.
+     /// `machine`: another machine (`hc machine ls`); its space starts in that machine's home.
+     fn new_space(&mut self, name: &str, folder: Option<String>, ctx_name: Option<&str>, argv: Option<Vec<String>>, task: Option<&str>, machine: Option<String>, window: &Window) -> Result<Value, String> {
+@@ -2454,18 +2473,41 @@ impl AppWindow {
+         Ok(json!({ "space": space, "tab": ctx, "terminal": addr }))
+     }
+
++    fn new_ssh_space(&mut self, name: &str, value: &Value, window: &Window) -> Result<Value, String> {
++        let project = crate::ssh_project::Project::parse(value)?;
++        let args = project.argv(None, value.get("create").and_then(Value::as_bool) == Some(true));
++        let name = if name.trim().is_empty() { model::folder_name(&project.folder, "") } else { name.to_owned() };
++        let (space, ctx, pane) = (self.model.fresh_id_on("sp", None), self.model.fresh_id_on("tb", None), self.model.fresh_id_on("p", None));
++        let size = self.initial_size(&Tab::new(&ctx, "", &pane, "").root, &pane, window);
++        let (addr, folder) = self.spawn(Some(Self::ssh_argv(args)), home(), false, &space, &ctx, None, size, window)?;
++        self.model.add_space(&space, &name, &folder, Tab::new(&ctx, "Terminal", &pane, &addr));
++        if let Some(p) = self.model.space_mut(&space) {
++            p.rest.insert("ssh".into(), project.as_json());
++        }
++        Ok(json!({ "space": space, "tab": ctx, "terminal": addr }))
++    }
++
+     /// A tab in a space (default: the shown one), shown at once.
+-    fn new_tab(&mut self, space: Option<String>, name: &str, folder: Option<String>, argv: Option<Vec<String>>, task: Option<&str>, window: &Window) -> Result<Value, String> {
++    fn new_tab(&mut self, space: Option<String>, name: &str, folder: Option<String>, argv: Option<Vec<String>>, task: Option<&str>, window: &Window, agent: Option<&str>) -> Result<Value, String> {
+         let space = space.or_else(|| self.model.active_space().map(|p| p.id.clone())).ok_or("no space yet: make one first (space.new)")?;
+-        if self.model.space(&space).is_none() {
+-            return Err(format!("no space {space:?}"));
+-        }
++        let target = self.model.space(&space).ok_or_else(|| format!("no space {space:?}"))?;
++        let ssh = target.rest.get("ssh").map(crate::ssh_project::Project::parse).transpose()?;
+         let follow = folder.is_none();
+         let folder = folder.unwrap_or_else(|| self.folder_for(&space));
+         let on = self.machine_of(&space);
+         let (ctx, pane) = (self.model.fresh_id_on("tb", on.as_deref()), self.model.fresh_id_on("p", on.as_deref()));
+         let size = self.initial_size(&Tab::new(&ctx, "", &pane, "").root, &pane, window);
+-        let (addr, _) = self.spawn(Self::agent_argv(argv.clone(), task, on.as_deref()).or(argv), folder, follow, &space, &ctx, on.as_deref(), size, window)?;
++        let (addr, _) = if let Some(project) = ssh {
++            if on.is_some() { return Err("SSH projects need a local Space".into()); }
++            let command = agent.map(|key| crate::ssh_project::agent_command(key, task)).transpose()?;
++            if argv.is_some() && command.is_none() {
++                return Err("Use a registered SSH agent for this project".into());
++            }
++            let args = project.argv(command.as_deref(), false);
++            self.spawn_labeled(Some(Self::ssh_argv(args)), home(), false, &space, &ctx, None, size, window, agent)?
++        } else {
++            self.spawn(Self::agent_argv(argv.clone(), task, on.as_deref()).or(argv), folder, follow, &space, &ctx, on.as_deref(), size, window)?
++        };
+         self.model.add_tab(&space, Tab::new(&ctx, name.trim(), &pane, &addr));
+         self.model.active = Some(space.clone());
+         Ok(json!({ "space": space, "tab": ctx, "terminal": addr }))
+@@ -2492,6 +2534,7 @@ impl AppWindow {
+         let target = pane.or_else(|| self.model.focused_pane()).ok_or("no pane to split")?;
+         let (Some(p), Some(c)) = (self.model.space_of(&target), self.model.tab_of(&target)) else { return Err(format!("no pane {target:?}")) };
+         let (space, ctx, fallback) = (p.id.clone(), c.id.clone(), p.folder.clone());
++        let ssh = p.rest.get("ssh").map(crate::ssh_project::Project::parse).transpose()?;
+         let target_addr = self.model.address_of(&target);
+         let follow = folder.is_none();
+         let cwd = folder.unwrap_or_else(|| target_addr.as_ref().and_then(|a| self.cwds.get(a).cloned()).unwrap_or(fallback));
+@@ -2502,7 +2545,13 @@ impl AppWindow {
+         root.split(&target, axis, Node::block(new.clone(), Content::Terminal { terminal: String::new() }), "initial-size".into());
+         let size = self.model.active_tab().filter(|tab| tab.id == ctx)
+             .and_then(|_| self.initial_size(&root, &new, window));
+-        let (addr, _) = self.spawn(argv, cwd, follow, &space, &ctx, on.as_deref(), size, window)?;
++        let (addr, _) = if let Some(project) = ssh {
++            if argv.is_some() { return Err("Start an SSH agent from the project menu".into()); }
++            let args = Self::ssh_argv(project.argv(None, false));
++            self.spawn(Some(args), home(), false, &space, &ctx, None, size, window)?
++        } else {
++            self.spawn(argv, cwd, follow, &space, &ctx, on.as_deref(), size, window)?
++        };
+         self.model.split(&target, axis, &new, &addr);
+         Ok(json!({ "pane": new, "terminal": addr }))
+     }
+@@ -2835,7 +2884,7 @@ impl AppWindow {
+             crate::telemetry::command(command.name);
+         }
+         if name == "space.new" {
+-            let machine = new_space_machine(&args, person, &self.model);
++            let machine = if args.get("ssh").is_some() { None } else { new_space_machine(&args, person, &self.model) };
+             if !args.is_object() { args = json!({}); }
+             args["machine"] = json!(machine);
+         }
+@@ -2893,7 +2942,11 @@ impl AppWindow {
+             // ---- spaces
+             "space.new" => {
+                 let name = Self::arg(a, "name").unwrap_or_default();
+-                let r = self.new_space(name, Self::owned(a, "folder"), Self::arg(a, "tab"), Self::argv(a), Self::arg(a, "task"), Self::owned(a, "machine").filter(|m| !m.is_empty()), window);
++                let r = if let Some(ssh) = a.get("ssh") {
++                    self.new_ssh_space(name, ssh, window)
++                } else {
++                    self.new_space(name, Self::owned(a, "folder"), Self::arg(a, "tab"), Self::argv(a), Self::arg(a, "task"), Self::owned(a, "machine").filter(|m| !m.is_empty()), window)
++                };
+                 self.answer(r);
+             }
+             "space.close" => {
+@@ -2947,7 +3000,7 @@ impl AppWindow {
+                     None if person && a.get("space").is_none() && self.model.active_space().is_none() => {
+                         self.new_space("", Self::owned(a, "folder"), Some(name), Self::argv(a), Self::arg(a, "task"), None, window)
+                     }
+-                    None => self.new_tab(Self::owned(a, "space"), name, Self::owned(a, "folder"), Self::argv(a), Self::arg(a, "task"), window),
++                    None => self.new_tab(Self::owned(a, "space"), name, Self::owned(a, "folder"), Self::argv(a), Self::arg(a, "task"), window, Self::arg(a, "agent")),
+                 };
+                 self.answer(r);
+             }
+@@ -3101,7 +3154,7 @@ impl AppWindow {
+                         let name = Self::owned(a, "name")
+                             .or_else(|| argv.as_ref().and_then(|v| v.first()).map(|p| p.rsplit('/').next().unwrap_or(p).to_owned()))
+                             .unwrap_or_else(|| "shell".into());
+-                        self.new_tab(None, &name, Self::owned(a, "folder"), argv, None, window)
++                        self.new_tab(None, &name, Self::owned(a, "folder"), argv, None, window, None)
+                     }
+                 };
+                 self.answer(r);
+@@ -3849,7 +3902,7 @@ impl AppWindow {
+                         json!({ "id": c.id, "name": Model::tab_name(p, c), "active": Some(&c.id) == active.as_ref(), "settled": c.settled.is_some(), "terminals": terms })
+                     })
+                     .collect();
+-                json!({ "id": p.id, "name": m.space_name(p, &home()), "folder": p.folder, "machine": p.machine, "active": m.active.as_deref() == Some(&p.id), "tabs": tabs })
++                json!({ "id": p.id, "name": m.space_name(p, &home()), "folder": p.folder, "machine": p.machine, "ssh": p.rest.get("ssh"), "active": m.active.as_deref() == Some(&p.id), "tabs": tabs })
+             })
+             .collect();
+         json!({ "spaces": spaces, "recent": m.recent })
