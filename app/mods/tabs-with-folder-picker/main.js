@@ -151,8 +151,6 @@ export default class Tabs extends View {
       .when(enabled.includes("tasks"), el => el.child(panelButton("tasks", "Tasks", "icons/shell.svg")))
       .child(button("workspace-actions", svg("mods/workspace-chrome/search.svg").size(15), () =>
         run("mod.open", { name: "workspace-actions" })).tooltip("Workspace commands"))
-      .child(button("workspace-look", svg("mods/workspace-chrome/settings.svg").size(15), () =>
-        run("mod.open", { name: "workspace-appearance" })).tooltip("Workspace appearance"))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-with-folder-picker/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs-with-folder-picker/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/tabs-with-folder-picker/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));

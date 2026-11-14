@@ -4,7 +4,7 @@
 
 ## 安装
 
-两个系统共用 `app/` 下的布局、面板和状态桥，安装器再覆盖 `platforms/macos/app/` 或 `platforms/windows/app/`。平台目录包含各自的壁纸导入器和 Qoder 启动器。
+两个系统共用 `app/` 下的布局、面板和状态桥，安装器再覆盖 `platforms/macos/app/` 或 `platforms/windows/app/`。平台目录包含各自的 Qoder 启动器和桌面外观导入器。
 
 macOS 在 Herdr 首次启动并生成配置后，于仓库根目录执行：
 
@@ -53,7 +53,7 @@ herdr-app do layout.switch --name workspace-folders
 ## 工作区界面
 
 - 工作圆环显示在 Agents 面板。项目内的 Agent 标签显示 `Agent · 项目`，手动命名的项目标签显示 `自定义名称 · 项目`。临时会话显示 Agent 原生名。项目从选定的工作区文件夹或 Git 信息识别。
-- 标签栏右侧齿轮打开外观设置。可预览纯色、渐变、图片和紧凑侧栏。输入本地图片的绝对路径后点 Import。导入的图片保存在本机 Herdr 配置目录的 `backgrounds/` 中。
+- 桌面定制版在 **Settings → Look → Workspace appearance** 中提供外观设置。可预览纯色、渐变、图片和紧凑侧栏。输入本地图片的绝对路径后点 Import。导入的图片保存在本机 Herdr 配置目录的 `backgrounds/` 中。
 - Changes 支持按路径筛选、暂存分组和展开 Diff。筛选只影响视图，提交范围仍由暂存状态或明确确认的全部文件决定。
 - Files 支持文件名搜索、仅显示变更和隐藏常见构建目录。在 Git 项目中搜索索引和未忽略文件，在其他目录中搜索已加载的文件夹。
 - Tasks 显示项目任务、退出码和最近输出。没有 `.herdr/tasks.json` 时读取 `package.json` 的 `dev`、`test` 和 `build`。自定义任务以命令及参数数组声明，点击后才运行。配置示例见下方。

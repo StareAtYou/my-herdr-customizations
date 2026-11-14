@@ -15,7 +15,7 @@ export default class WorkspaceCommands extends View {
     const active = spaces().find(space => space.active);
     const panel = layout()?.children?.find(node => node.id === "work")?.children?.find(node => node.id === "work-body")?.children?.find(node => node.id === "panel");
     const items = [
-      ["Workspace appearance", () => run("mod.open", { name: "workspace-appearance" })],
+      ["Workspace appearance", () => run("app.settings", { section: "look" })],
       ["All Herdr commands", () => run("app.palette")],
     ];
     if (panel) items.unshift(["Open tasks and logs", () => {
