@@ -1,7 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
-import { workingRing } from "./status-ring.js";
-import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings } from "herdr";
+import { folderKey, tabLabel } from "./tab-label.js";
+import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, home, exec } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -15,6 +15,7 @@ function find(node, id) {
 export default class Tabs extends View {
   init() {
     this.pressed = null;
+    this.projects = new Map();
     this.scroll = ScrollHandle.new();
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
   }
@@ -47,11 +48,36 @@ export default class Tabs extends View {
     localStorage.setItem("panels", JSON.stringify(this.panels));
   }
 
-  render() {
+  inspectProject(space, cx) {
+    const folder = folderKey(space?.folder);
+    if (!folder || folder === "~" || (!space.machine && folder === folderKey(home()))) return false;
+    const key = JSON.stringify([space.machine, folder]);
+    if (!this.projects.has(key)) {
+      this.projects.set(key, false);
+      cx.spawn(async cx => {
+        try {
+          const result = await exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd: space.folder, on: space.machine, timeout: 3000 });
+          if (result.code === 0 && result.stdout.trim() === "true") {
+            this.projects.set(key, true);
+            cx.notify();
+          }
+        } catch {
+          // Herdr's existing Git metadata and selected folders still work.
+        }
+      });
+    }
+    return this.projects.get(key);
+  }
+
+  render(cx) {
     const t = theme();
     const motion = !shared("workspace.reduce-motion");
     const space = spaces().find(p => p.active);
     const shown = space?.tabs ?? [];
+    const allPanes = panes();
+    const repo = allPanes.some(pane => pane.program?.agent && shown.some(tab => tab.id === pane.tab))
+      && this.inspectProject(space, cx);
+    const projectFolders = [...(shared("workspace.project-folders") ?? []), ...(shared("workspace.recent-folders") ?? [])];
     const active = shown.findIndex(tab => tab.active);
     const selected = shown[active]?.id;
     if (selected !== this.selected || active !== this.selectedIndex) {
@@ -63,11 +89,14 @@ export default class Tabs extends View {
     const button = (id, label, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.dim).cursor_pointer().active(s => s.opacity(0.74)).hover(s => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", stop).on_click(action).child(label);
     const item = (c, i) => {
-      const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
-      const name = /^tb\d+$/.test(c.name) ? program?.name ?? "Terminal" : c.name;
+      const tabPanes = allPanes.filter(pane => pane.tab === c.id);
+      const primary = tabPanes.find(pane => pane.program?.agent) ?? tabPanes[0];
+      const program = primary?.program;
+      const { label, detail, tooltip } = tabLabel(c, space, primary, home(), projectFolders, repo);
       return h_flex().id(`tab-${c.id}`).relative().h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         // A rename or status dot on this or an earlier tab can push the active one out.
         .when(i <= active, el => el.on_size_change((_size, cx) => { this.scroll.scroll_to_item(active); cx.notify(); }))
+        .tooltip(tooltip)
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
         .hover(s => s.bg(t.hover)).active(s => s.opacity(0.77))
         .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.pressed = i; if (e.click_count === 2) run("tab.rename", { id: c.id }); })
@@ -80,8 +109,8 @@ export default class Tabs extends View {
         .child(div().id(`tab-marker-${c.id}`).absolute().bottom(0).left(7).right(7).h(2).rounded(1).bg(t.accent)
           .opacity(c.active ? 0.85 : 0).when(motion, el => el.transition("opacity", { duration: 135, easing: "ease-out" })))
         .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
-        .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
-        .when(c.status === "working", el => el.child(workingRing(`tab-work-${c.id}`, t)))
+        .child(div().max_w(142).truncate().child(c.zoomed ? `${label} Z` : label))
+        .when(Boolean(detail), el => el.child(div().max_w(138).truncate().text_color(t.muted).child(`· ${detail}`)))
         .when(c.status === "blocked" || c.status === "done", el => el.child(div().size(6).rounded(3).bg(t[c.status])))
         .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
     };

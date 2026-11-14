@@ -1,6 +1,5 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { workingRing } from "./status-ring.js";
 import { theme, spaces, panes, knownAgents, run, openOverlay, closeOverlay, props, window, keys, shared, setShared } from "herdr";
 
 // The last agents each machine reported, shown at once while knownAgents() checks again.
@@ -104,7 +103,6 @@ export default class NewMenu extends View {
         .child(space ? `${space.name}${this.machine ? ` · ${this.machine}` : ""}` : "This computer"))
       .child(row(terminal))
       .child(h_flex().px(8).pt(5).pb(2).gap(6).items_center().text_size(11).text_color(t.muted)
-        .when(this.loading, el => el.child(workingRing("launcher-probe", t, 20)))
         .child(this.loading ? "Checking agents…" : this.error ? "Detection unavailable" : installed.length ? "Start an agent" : "No installed agents"))
       .child(v_flex().id("launchers").max_h(240).overflow_y_scrollbar().track_scroll(this.scroll).children(agentRows.map(row)))
       .when(this.error, el => el.child(row(retry)))

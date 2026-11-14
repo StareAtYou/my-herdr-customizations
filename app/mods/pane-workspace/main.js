@@ -6,7 +6,6 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { workingRing, isCompacting } from "./status-ring.js";
 import { panes, props, run, theme, home, layout, shared, terminals } from "herdr";
 
 // Match the first visible tab frame, including the active child of a stack.
@@ -91,9 +90,8 @@ export default class Pane extends View {
       .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(name))
       .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
       .when(unknown, el => el.child(div().text_size(11).text_color(t.muted).tooltip("Waiting for the agent to report its status").child("Status unknown")))
-      .when(st === "working", el => el.child(h_flex().flex_none().gap(6).items_center()
-        .when(isCompacting(report), row => row.child(div().text_size(11).text_color(t.working).child("Compacting context")))
-        .child(workingRing(`pane-work-${pane}`, t))))
+      .when(st === "working" && report?.msg === "Compacting context", el =>
+        el.child(div().text_size(11).text_color(t.working).child("Compacting context")))
       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child(label)))
       .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
       .when(this.hovered, el => el

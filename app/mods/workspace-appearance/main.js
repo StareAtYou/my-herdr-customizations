@@ -71,7 +71,8 @@ export default class WorkspaceAppearance extends View {
     const row = (label, controls) => h_flex().gap(8).items_center()
       .child(div().w(126).flex_none().text_size(12).text_color(t.muted).child(label)).children(controls);
     const percent = (name, values = levels) => values.map(value => button(name + value, Math.round(value * 100) + "%", (_e, cx) => set(name, value, cx), Math.abs(d[name] - value) < .006));
-    const glass = window()?.macos_glass === true;
+    const nativeWindow = window();
+    const glass = nativeWindow?.macos_glass === true;
     const ready = shared("layout") === "workspace-folders";
     return v_flex().id("appearance").size_full().min_h(0).overflow_y_scroll().p(20).gap(12).bg(t.background).text_color(t.foreground)
       .child(div().text_size(18).font_semibold().child("Workspace appearance"))
@@ -89,6 +90,8 @@ export default class WorkspaceAppearance extends View {
           button("contain", "Fit", (_e, cx) => set("fit", "contain", cx), d.fit === "contain"),
         ])))
         .when(Boolean(this.error), el => el.child(div().text_size(12).text_color(t.blocked).child(this.error)))
+        .when(d.style === "glass", el => el.child(div().text_size(12).text_color(t.muted)
+          .child(nativeWindow?.macos_glass_active ? "Window blur is active" : "Window blur applies after saving and follows macOS transparency settings.")))
         .when(d.style !== "glass", el => el.child(row("Terminal background", percent("terminal"))))
         .when(d.style !== "solid", el => el.child(row("Background shade", percent("shade", d.style === "glass" ? glassLevels : levels))))
         .child(row("Sidebar", [

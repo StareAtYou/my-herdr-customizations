@@ -1,6 +1,6 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { closeOverlay, exec, focused, pickFolder, props, run, setShared, shared, spaces, theme } from "herdr";
+import { closeOverlay, exec, focused, pickFolder, props, run, setShared, shared, spaces, theme, window } from "herdr";
 
 const RECENT = "workspace.recent-folders";
 
@@ -19,7 +19,11 @@ export default class ChooseWorkspaceFolder extends View {
   }
 
   finish(folder) {
-    if (folder) setShared(RECENT, [folder, ...(shared(RECENT) ?? []).filter(path => path !== folder)].slice(0, 5));
+    if (folder) {
+      setShared(RECENT, [folder, ...(shared(RECENT) ?? []).filter(path => path !== folder)].slice(0, 5));
+      const projects = shared("workspace.project-folders") ?? [];
+      setShared("workspace.project-folders", [folder, ...projects.filter(path => path !== folder)].slice(0, 100));
+    }
     run("space.new", { ...(folder ? { folder } : {}), machine: this.machine });
     closeOverlay(this.overlay);
   }
@@ -42,8 +46,7 @@ export default class ChooseWorkspaceFolder extends View {
       try {
         const folder = option.detail ?? await pickFolder({ prompt: "Open workspace" });
         if (!folder || this.closed) return;
-        const check = await exec("/bin/test", ["-d", folder], { timeout: 3000 });
-        if (check.code !== 0) {
+        if (window()?.platform !== "windows" && (await exec("/bin/test", ["-d", folder], { timeout: 3000 })).code !== 0) {
           this.error = "That folder is unavailable. Choose another folder.";
           return;
         }
