@@ -1,0 +1,8 @@
+{
+  "global": {
+    "ctrl-shift-n": "mod.open:choose-workspace-folder",
+    "ctrl-shift-,": "mod.open:workspace-appearance",
+    "ctrl-alt-p": "mod.open:workspace-actions",
+    "ctrl-alt-shift-j": "agents-workspace.next-blocked"
+  }
+}

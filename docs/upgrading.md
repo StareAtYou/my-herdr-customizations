@@ -13,7 +13,7 @@
 
 1. 阅读 [App 更新记录](https://github.com/herdrdev/herdr-app/blob/master/CHANGELOG.md) 和 [Core 更新记录](https://github.com/herdrdev/herdr-core/blob/master/CHANGELOG.md)。在单独目录取得目标版本的 App 源码。重点比对下表中的文件和该版本的 herdr.d.ts。
 2. 在目标源码根目录对补丁逐个运行 git apply --check，参数传入本仓库 patches/ 中相应补丁的绝对路径。能干净应用时，在临时源码副本应用后把派生文件复制回 app/ 下对应的自定义路径。遇到冲突时，按补丁的功能意图合并到新的官方默认文件。
-3. 更新布局和派生 Mod 清单里的 cloned_from.version，刷新 baseline/keys.windows.json 与对应补丁。用新版本的 Herdr App 对 4 个 Mod 运行检查，并在隔离的 HERDR_APP_HOME 验收。
+3. 更新布局和派生 Mod 清单里的 cloned_from.version，刷新 platforms/windows/baseline/keys.windows.json 与对应补丁。用新版本的 Herdr App 对 4 个 Mod 运行检查，并在隔离的 HERDR_APP_HOME 验收。
 4. 验收后提交，更新基线和已验证版本，打一个新标签。旧标签可继续恢复旧版本配置。
 
 | 官方默认路径 | 补丁 | 定制安装路径 |
@@ -38,3 +38,5 @@
 1. 在 Herdr 切回 **main** 布局。快捷键是 Ctrl+Shift+L，也可以运行 herdr-app do layout.switch --name main。
 2. 打开本次应用产生的 restore-manifest.json。对每个条目，将 backup 指向的相对文件从该备份目录复制回 path。backup 为 null 的条目表示本次新建，确认该路径仍是本次生成的文件后可删除。备份包含目标机旧配置，只保存在目标机。
 3. 已打开的终端保留启动时使用的 Shell。打开新终端检查回滚后的 Shell 配置。
+
+`patches/core-persistence-v0.1.21.patch` 是独立的 Core 源码补丁。它增加终端登记落盘失败提示，涉及 Unix 的终端持久化测试。正常安装只更新 App 配置。Windows 如需移植 Core 改动，可先按平台检查终端保活测试。

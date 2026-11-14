@@ -1,6 +1,8 @@
 const { spawn } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { createServer } = require("node:net");
+const { mkdtempSync, rmSync } = require("node:fs");
+const { join } = require("node:path");
 
 const states = new Set(["idle", "working", "blocked", "done", "error", "clear"]);
 const kinds = new Set(["permission", "question", "auth"]);
@@ -19,17 +21,25 @@ function safeTitle(value) {
 
 function createReporter(app) {
   let current = {};
-  function report(state, kind, title) {
+  let compacting = false;
+  let manualCompact = false;
+  const compactMessage = "Compacting context";
+
+  function report(state, kind, title, message) {
     kind = state === "blocked" && kinds.has(kind) ? kind : undefined;
     title = safeTitle(title);
-    if (current.state === state && current.kind === kind && current.title === title) return;
-    current = { state, kind, title };
+    if (current.state === state && current.kind === kind && current.title === title && current.message === message) return;
+    current = { state, kind, title, message };
+    if (process.env.HERDR_STATUS_DEBUG === "1") {
+      console.error(`[Herdr status] ${new Date().toISOString()} ${app}: ${state}${kind ? ` (${kind})` : ""}`);
+    }
 
     const fields = ["state=" + state];
     if (state !== "clear") {
       fields.push("app=" + app);
       if (kind) fields.push("kind=" + kind);
       if (title) fields.push("title=" + Buffer.from(title, "utf8").toString("base64"));
+      if (message) fields.push("msg=" + Buffer.from(message, "utf8").toString("base64"));
     }
     process.stdout.write("\x1b]7501;" + fields.join(":") + "\x1b\\");
   }
@@ -43,29 +53,70 @@ function createReporter(app) {
 
     switch (value.event) {
       case "SessionStart":
-        if (!["working", "blocked"].includes(current.state)) report("idle");
+        if (value.source === "compact") {
+          // CodeBuddy emits this before continuing an automatic turn or resetting a manual one.
+          compacting = false;
+          if (current.state !== "blocked") report(manualCompact ? "idle" : "working");
+        } else {
+          compacting = false;
+          manualCompact = false;
+          if (!["working", "blocked"].includes(current.state) || current.message === compactMessage) report("idle");
+        }
         break;
-      case "UserPromptSubmit": report("working"); break;
+      case "UserPromptSubmit":
+        compacting = false;
+        manualCompact = false;
+        report("working");
+        break;
+      case "PreCompact":
+        compacting = true;
+        manualCompact = value.trigger === "manual";
+        report("working", undefined, undefined, compactMessage);
+        break;
+      case "PostCompact":
+        compacting = false;
+        if (value.trigger) manualCompact = value.trigger === "manual";
+        if (current.state !== "blocked") report(manualCompact ? "idle" : "working");
+        break;
+      case "PreToolUse":
+        if (!compacting && current.state !== "blocked") {
+          manualCompact = false;
+          report("working");
+        }
+        break;
       case "Elicitation": report("blocked", "question"); break;
       case "ElicitationResult":
-        if (current.kind === "question") report("working");
+        if (current.kind === "question") report("working", undefined, undefined, compacting ? compactMessage : undefined);
         break;
       case "Notification":
         if (value.kind === "permission_prompt") report("blocked", "permission");
         if (value.kind === "elicitation_dialog") report("blocked", "question");
-        if (value.kind === "idle_prompt" && ["working", "blocked"].includes(current.state)) report("idle");
+        if (value.kind === "idle_prompt" && !compacting && current.state === "working") report("idle");
         break;
       case "PostToolUse":
       case "PostToolUseFailure":
         if (value.kind === "interrupt" && ["working", "blocked"].includes(current.state)) {
+          compacting = false;
+          manualCompact = false;
           report("idle");
         } else if (current.kind === "permission" || (current.kind === "question" && value.kind === "question")) {
-          report("working");
+          report("working", undefined, undefined, compacting ? compactMessage : undefined);
         }
         break;
-      case "Stop": report("done"); break;
-      case "StopFailure": report("error"); break;
-      case "SessionEnd": report("clear"); break;
+      case "Stop":
+        compacting = false;
+        report(manualCompact ? "idle" : "done");
+        break;
+      case "StopFailure":
+        compacting = false;
+        manualCompact = false;
+        report("error");
+        break;
+      case "SessionEnd":
+        compacting = false;
+        manualCompact = false;
+        report("clear");
+        break;
     }
   }
 
@@ -133,15 +184,23 @@ async function main([app, program, ...args]) {
   const env = { ...process.env };
   delete env.HERDR_AGENT_STATUS_PIPE;
   const reporter = createReporter(app);
+  // Keep the Unix address short for macOS, inside a private directory.
+  const windows = process.platform === "win32";
   let relay;
-  if (process.platform === "win32" && env.HC_TERMINAL_ID) {
-    const address = "\\\\.\\pipe\\herdr-agent-" + randomUUID();
-    relay = createRelay(reporter.receive);
-    const listening = await new Promise(resolve => {
-      relay.server.on("error", () => resolve(false));
-      relay.server.listen(address, () => resolve(true));
-    });
-    if (listening) env.HERDR_AGENT_STATUS_PIPE = address;
+  let socketDir;
+  if (env.HC_TERMINAL_ID) {
+    try {
+      if (!windows) socketDir = mkdtempSync("/tmp/herdr-agent-");
+      const address = windows ? "\\\\.\\pipe\\herdr-agent-" + randomUUID() : join(socketDir, "relay.sock");
+      relay = createRelay(reporter.receive);
+      await new Promise((resolve, reject) => {
+        relay.server.once("error", reject);
+        relay.server.listen(address, resolve);
+      });
+      env.HERDR_AGENT_STATUS_PIPE = address;
+    } catch (error) {
+      console.error(`[Herdr status] Relay unavailable (${error.code ?? error.message}). The terminal can still run.`);
+    }
   }
 
   // The interactive child handles console interrupt keys.
@@ -151,6 +210,9 @@ async function main([app, program, ...args]) {
     return await runChild(program, args, env);
   } finally {
     relay?.close();
+    if (socketDir) {
+      try { rmSync(socketDir, { recursive: true, force: true }); } catch {}
+    }
     reporter.clear();
     process.off("SIGINT", ignoreInterrupt);
   }

@@ -1,5 +1,0 @@
-{
-  "global": {
-    "ctrl-shift-n": "mod.open:choose-workspace-folder"
-  }
-}

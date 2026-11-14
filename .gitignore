@@ -4,3 +4,9 @@
 *.sock
 /app/mods/*/gpui-kit.d.ts
 /app/mods/*/jsconfig.json
+.DS_Store
+__pycache__/
+*.pyc
+/backgrounds/
+/outputs/
+/work/

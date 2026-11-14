@@ -1,0 +1,257 @@
+diff --git a/crates/herdr-core/src/api.rs b/crates/herdr-core/src/api.rs
+index 89711d6..4718fd3 100644
+--- a/crates/herdr-core/src/api.rs
++++ b/crates/herdr-core/src/api.rs
+@@ -224,6 +224,7 @@ async fn server_status(core: Ctx<'_>, _: Empty) -> Result<StatusResult, RpcError
+         holders,
+         live,
+         finished: st.reg.terminals.len() - live,
++        registry_error: core.registry_error(),
+         installed_by: crate::client::installed_by().map(String::from),
+         keeps_running_after_logout,
+         logout_linger_user,
+diff --git a/crates/herdr-core/src/api/types.rs b/crates/herdr-core/src/api/types.rs
+index 7a2dae9..c8ee443 100644
+--- a/crates/herdr-core/src/api/types.rs
++++ b/crates/herdr-core/src/api/types.rs
+@@ -152,6 +152,9 @@ pub struct StatusResult {
+     pub holders: Vec<HolderInfo>,
+     pub live: usize,
+     pub finished: usize,
++    /// Last failed terminal state save, cleared after a newer snapshot reaches disk.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub registry_error: Option<String>,
+     /// The package manager this hc came from (homebrew, nix, mise, or
+     /// system package manager): it updates hc, `hc update` won't.
+     /// Null for a replaceable plain install.
+diff --git a/crates/herdr-core/src/cli.rs b/crates/herdr-core/src/cli.rs
+index 2035dd5..138951d 100644
+--- a/crates/herdr-core/src/cli.rs
++++ b/crates/herdr-core/src/cli.rs
+@@ -554,13 +554,16 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
+                 client::call(&stream, "server.status", json!({}))?
+             };
+             let id = r["core"]["id"].as_str().unwrap_or("?");
+-            let human = format!(
++            let mut human = format!(
+                 "core {} ({}) running, pid {}, up {}s",
+                 r["core"]["name"].as_str().unwrap_or("?"),
+                 id.get(..8).unwrap_or(id),
+                 r["pid"],
+                 r["uptime_ms"].as_u64().unwrap_or(0) / 1000
+             );
++            if let Some(error) = r["registry_error"].as_str() {
++                human.push_str(&format!("\nTerminal state could not be saved: {error}"));
++            }
+             Out { json: r, human }
+         }
+         Cmd::Server { action: ServerCmd::Stop } => stop(&paths)?,
+diff --git a/crates/herdr-core/src/runtime.rs b/crates/herdr-core/src/runtime.rs
+index acf2293..4c47c36 100644
+--- a/crates/herdr-core/src/runtime.rs
++++ b/crates/herdr-core/src/runtime.rs
+@@ -238,9 +238,13 @@ impl Core {
+         self.registry_writer.save(bytes);
+     }
+ 
++    pub fn registry_error(&self) -> Option<String> {
++        self.registry_writer.last_error()
++    }
++
+     /// Acknowledged mutations wait here without holding the state lock or blocking the executor.
+     /// Attach, events.subscribe snapshots, forwarded run `afar`, and NotesAfar replies do not wait.
+-    /// Completed write failures are logged, as before; a stuck disk still times out.
++    /// Report disk failures separately from mutations already applied in memory.
+     pub async fn flush_saved(&self) -> Result<(), crate::rpc::RpcError> {
+         tokio::time::timeout(Duration::from_secs(10), self.registry_writer.flush())
+             .await
+@@ -251,7 +255,13 @@ impl Core {
+                     "check the terminal and disk before retrying",
+                 )
+             })?
+-            .map_err(|e| crate::rpc::RpcError::internal(format!("cannot save terminals: {e}")))
++            .map_err(|e| {
++                crate::rpc::RpcError::new(
++                    "unavailable",
++                    format!("cannot save terminals: {e}; the operation may already have completed in memory"),
++                    "check the terminal and disk before retrying",
++                )
++            })
+     }
+ 
+     /// For frequent changes a crash may lose (the next start rebuilds them):
+diff --git a/crates/herdr-core/src/runtime/persistence.rs b/crates/herdr-core/src/runtime/persistence.rs
+index ffb465b..89d871c 100644
+--- a/crates/herdr-core/src/runtime/persistence.rs
++++ b/crates/herdr-core/src/runtime/persistence.rs
+@@ -8,10 +8,17 @@ use tokio::sync::watch;
+ 
+ pub(super) struct RegistryWriter {
+     queue: Arc<(Mutex<Pending>, Condvar)>,
+-    completed: watch::Receiver<u64>,
++    completed: watch::Receiver<WriteProgress>,
+     worker: Option<JoinHandle<()>>,
+ }
+ 
++#[derive(Default)]
++struct WriteProgress {
++    attempted: u64,
++    saved: u64,
++    error: Option<Arc<io::Error>>,
++}
++
+ #[derive(Default)]
+ struct Pending {
+     latest: Option<(u64, Vec<u8>)>,
+@@ -26,7 +33,7 @@ impl RegistryWriter {
+ 
+     pub(super) fn start(mut write: impl FnMut(&[u8]) -> io::Result<()> + Send + 'static) -> io::Result<Self> {
+         let queue = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
+-        let (done, completed) = watch::channel(0);
++        let (done, completed) = watch::channel(WriteProgress::default());
+         let work = queue.clone();
+         let worker = std::thread::Builder::new().name("registry-writer".into()).spawn(move || {
+             let (mutex, changed) = &*work;
+@@ -34,10 +41,20 @@ impl RegistryWriter {
+             loop {
+                 if let Some((version, bytes)) = pending.latest.take() {
+                     drop(pending);
+-                    if let Err(e) = write(&bytes) {
++                    let result = write(&bytes);
++                    if let Err(e) = &result {
+                         eprintln!("core: cannot save terminals: {e}");
+                     }
+-                    done.send_replace(version);
++                    done.send_modify(|progress| {
++                        progress.attempted = version;
++                        match result {
++                            Ok(()) => {
++                                progress.saved = version;
++                                progress.error = None;
++                            }
++                            Err(e) => progress.error = Some(Arc::new(e)),
++                        }
++                    });
+                     pending = mutex.lock().unwrap();
+                 } else if pending.closed {
+                     break;
+@@ -58,15 +75,23 @@ impl RegistryWriter {
+         changed.notify_one();
+     }
+ 
++    pub fn last_error(&self) -> Option<String> {
++        self.completed.borrow().error.as_ref().map(ToString::to_string)
++    }
++
+     /// Wait for the current snapshot, not for unrelated future saves. Never hold the core lock.
+     pub async fn flush(&self) -> io::Result<()> {
+         let version = self.queue.0.lock().unwrap().submitted;
+         let mut completed = self.completed.clone();
+-        completed
+-            .wait_for(|written| *written >= version)
++        let progress = completed
++            .wait_for(|progress| progress.attempted >= version)
+             .await
+             .map_err(|_| io::Error::other("registry writer stopped"))?;
+-        Ok(())
++        if progress.saved >= version {
++            return Ok(());
++        }
++        let error = progress.error.as_ref().expect("attempted version failed");
++        Err(io::Error::new(error.kind(), error.to_string()))
+     }
+ }
+ 
+@@ -157,7 +182,7 @@ mod tests {
+     }
+ 
+     #[tokio::test]
+-    async fn a_flush_can_be_cancelled_and_a_failed_write_does_not_fail_the_barrier() {
++    async fn a_flush_can_be_cancelled_and_reports_write_failure() {
+         let (started, writes) = mpsc::channel();
+         let (release, blocked) = mpsc::channel();
+         let writer = RegistryWriter::start(move |_| {
+@@ -170,7 +195,18 @@ mod tests {
+         writes.recv_timeout(Duration::from_secs(5)).unwrap();
+         assert!(tokio::time::timeout(Duration::from_millis(10), writer.flush()).await.is_err());
+         release.send(()).unwrap();
+-        writer.flush().await.unwrap();
++        assert_eq!(writer.flush().await.unwrap_err().to_string(), "disk failed");
++        assert_eq!(writer.flush().await.unwrap_err().to_string(), "disk failed");
++    }
++
++    #[tokio::test]
++    async fn a_later_success_recovers_a_failed_full_snapshot() {
++        let writer =
++            RegistryWriter::start(|bytes| if bytes == [1] { Err(io::Error::other("disk full")) } else { Ok(()) })
++                .unwrap();
++        writer.save(vec![1]);
++        assert_eq!(writer.flush().await.unwrap_err().to_string(), "disk full");
++        writer.save(vec![2]);
+         writer.flush().await.unwrap();
+     }
+ }
+diff --git a/crates/herdr-core/src/runtime/tests.rs b/crates/herdr-core/src/runtime/tests.rs
+index 92d342c..2a7fe9d 100644
+--- a/crates/herdr-core/src/runtime/tests.rs
++++ b/crates/herdr-core/src/runtime/tests.rs
+@@ -397,6 +397,41 @@ async fn label_and_kill_reply_with_the_record_observed_before_flushing() {
+     }
+ }
+ 
++#[tokio::test]
++async fn a_registry_write_failure_reaches_the_mutation_caller_and_the_next_save_recovers() {
++    let (core, root) = test_core();
++    let terminal = {
++        let mut st = core.lock();
++        let id = st
++            .reg
++            .create(crate::terminals::NewTerminal { argv: vec!["sh".into()], ..Default::default() }, now_ms())
++            .unwrap();
++        crate::terminals::address(id)
++    };
++    core.flush_saved().await.unwrap();
++    let temp = core.paths.state.join("terminals.tmp");
++    std::fs::create_dir(&temp).unwrap();
++    let call = crate::api::Call { core: &core, conn: None, plain: None };
++    let error = crate::api::dispatch(&call, "terminal.label", json!({"terminal": terminal, "labels":{"audit":"changed"}}))
++        .await
++        .unwrap_err();
++    assert_eq!(error.kind, "unavailable");
++    assert!(error.message.contains("in memory"));
++    let status = crate::api::dispatch(&call, "server.status", json!({})).await.unwrap();
++    assert!(status["registry_error"].is_string());
++    std::fs::remove_dir(&temp).unwrap();
++    let saved = crate::api::dispatch(&call, "terminal.label", json!({"terminal": terminal, "labels":{"disk":"recovered"}}))
++        .await
++        .unwrap();
++    assert_eq!(saved["labels"]["audit"], "changed");
++    let disk = std::fs::read_to_string(core.paths.state.join("terminals.json")).unwrap();
++    assert!(disk.contains("recovered"));
++    let status = crate::api::dispatch(&call, "server.status", json!({})).await.unwrap();
++    assert!(status.get("registry_error").is_none());
++    drop(core);
++    remove_root(&root);
++}
++
+ #[cfg(unix)]
+ #[test]
+ fn a_blocked_registry_write_does_not_hold_the_core_lock() {
+diff --git a/schema/hc.openrpc.json b/schema/hc.openrpc.json
+index 2048664..ac54960 100644
+--- a/schema/hc.openrpc.json
++++ b/schema/hc.openrpc.json
+@@ -1127,6 +1127,13 @@
+             "minimum": 0,
+             "type": "integer"
+           },
++          "registry_error": {
++            "description": "Last failed terminal state save, cleared after a newer snapshot reaches disk.",
++            "type": [
++              "string",
++              "null"
++            ]
++          },
+           "uptime_ms": {
+             "format": "uint64",
+             "minimum": 0,

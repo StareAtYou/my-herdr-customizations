@@ -4,6 +4,9 @@ const events = new Set([
   'SessionStart',
   'SessionEnd',
   'UserPromptSubmit',
+  'PreCompact',
+  'PostCompact',
+  'PreToolUse',
   'Notification',
   'Elicitation',
   'ElicitationResult',
@@ -13,9 +16,20 @@ const events = new Set([
   'StopFailure',
 ]);
 
+const readPayload = new Set(['SessionStart', 'PreCompact', 'PostCompact', 'Notification', 'PostToolUse', 'PostToolUseFailure']);
 const notificationKinds = new Set(['permission_prompt', 'idle_prompt', 'elicitation_dialog']);
 const pipePrefix = '\\\\.\\pipe\\';
 const maxInputBytes = 256 * 1024;
+
+// Windows hands out a named pipe; macOS and Linux a Unix domain socket path.
+function isStatusAddress(value) {
+  if (typeof value !== 'string' || !value) return false;
+  if (process.platform === 'win32') {
+    return value.startsWith(pipePrefix)
+      && /^[\w.-]{1,200}$/u.test(value.slice(pipePrefix.length));
+  }
+  return value.startsWith('/') && Buffer.byteLength(value) <= 100 && !value.includes('\u0000');
+}
 
 async function readHookInput(collect) {
   const chunks = [];
@@ -24,14 +38,17 @@ async function readHookInput(collect) {
     total += chunk.length;
     if (collect && total <= maxInputBytes) chunks.push(chunk);
   }
-  if (!collect || total > maxInputBytes) return {};
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (!collect || !total || total > maxInputBytes) return {};
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return {}; }
 }
 
 function sendReport(pipe, report) {
   return new Promise((resolve) => {
     const client = net.createConnection(pipe);
-    client.once('error', () => client.destroy());
+    client.once('error', error => {
+      if (process.env.HERDR_STATUS_DEBUG === '1') console.error(`[Herdr status] Hook delivery failed (${error.code ?? error.message})`);
+      client.destroy();
+    });
     client.once('close', resolve);
     client.once('connect', () => {
       client.end(`${JSON.stringify(report)}\n`);
@@ -42,13 +59,16 @@ function sendReport(pipe, report) {
 async function main() {
   const event = process.argv[2];
   const { HC_TERMINAL_ID: terminalId, HERDR_AGENT_STATUS_PIPE: pipe } = process.env;
-  if (!terminalId || !events.has(event) || !pipe?.startsWith(pipePrefix)) return;
-  if (!/^[\w.-]{1,200}$/u.test(pipe.slice(pipePrefix.length))) return;
+  if (!terminalId || !events.has(event) || !isStatusAddress(pipe)) return;
 
   const timeout = setTimeout(() => process.exit(0), 900);
   try {
     const report = { event };
-    const input = await readHookInput(event === 'Notification' || event === 'PostToolUse' || event === 'PostToolUseFailure');
+    const input = await readHookInput(readPayload.has(event));
+    if (event === 'SessionStart' && input?.source === 'compact') report.source = 'compact';
+    if ((event === 'PreCompact' || event === 'PostCompact') && (input?.trigger === 'manual' || input?.trigger === 'auto')) {
+      report.trigger = input.trigger;
+    }
     if (event === 'Notification') {
       if (!notificationKinds.has(input?.notification_type)) return;
       const asksQuestion = input.notification_type === 'permission_prompt'

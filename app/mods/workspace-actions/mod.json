@@ -1,0 +1,5 @@
+{
+  "place": "none",
+  "title": "Workspace commands",
+  "overlay": { "kind": "dialog", "width": 480, "height": 340 }
+}

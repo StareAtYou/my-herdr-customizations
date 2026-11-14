@@ -1,0 +1,99 @@
+diff --git a/src/window.rs b/src/window.rs
+index 08a4370..58f190a 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -4911,6 +4911,10 @@ impl Render for AppWindow {
+         }
+         self.tick_floats(window);
+         self.apply_titlebar(window);
++        #[cfg(target_os = "macos")]
++        let glass = self.macos_glass(window);
++        #[cfg(not(target_os = "macos"))]
++        let glass = false;
+         if mods::publish_window(self.window_json(window)) {
+             self.refresh_snapshot_mods(cx);
+         }
+@@ -4928,7 +4932,7 @@ impl Render for AppWindow {
+             .key_context(format!("Herdr layout = {}", self.layout_name).as_str())
+             .size_full()
+             .relative()
+-            .bg(c("background"))
++            .when(!glass, |el| el.bg(c("background")))
+             .text_color(c("foreground"))
+             .font_family(settings::get().ui_font_family.clone())
+             .on_action(cx.listener(|this, a: &ShellAction, w, cx| {
+diff --git a/src/window/titlebar.rs b/src/window/titlebar.rs
+index 1319016..ce9b4dd 100644
+--- a/src/window/titlebar.rs
++++ b/src/window/titlebar.rs
+@@ -62,6 +62,20 @@ impl AppWindow {
+         });
+     }
+
++    #[cfg(target_os = "macos")]
++    pub(super) fn macos_glass(&self, window: &mut Window) -> bool {
++        use gpui::WindowBackgroundAppearance;
++
++        let requested = self.layout_name == "workspace-folders"
++            && matches!(&self.chrome.background, Some(crate::layout::Background::Color(color)) if color == "#00000000");
++        let enabled = requested && !window.is_fullscreen() && !gpui_macos::reduce_transparency();
++        let appearance = if enabled { WindowBackgroundAppearance::Blurred } else { WindowBackgroundAppearance::Opaque };
++        if window.background_appearance() != appearance {
++            window.set_background_appearance(appearance);
++        }
++        enabled
++    }
++
+     /// What mods know about the window: `window()`.
+     pub(super) fn window_json(&self, window: &Window) -> Value {
+         let platform = if cfg!(target_os = "macos") {
+@@ -79,6 +93,7 @@ impl AppWindow {
+         };
+         json!({
+             "platform": platform,
++            "macos_glass": cfg!(target_os = "macos"),
+             "titlebar": if self.titlebar() == Titlebar::Layout { "none" } else { "system" },
+             "buttons": buttons,
+             "maximized": window.is_maximized(),
+diff --git a/vendor/ghostty b/vendor/ghostty
+index 291fd05..6d95777 160000
+--- a/vendor/ghostty
++++ b/vendor/ghostty
+@@ -1 +1 @@
+-Subproject commit 291fd050b9e9c293c8adb6a140742649b7e42d3a
++Subproject commit 6d9577708a211b0e6c5e6c6886f3cfb7efc47555-dirty
+diff --git a/vendor/gpui-pre-macos/src/gpui_macos.rs b/vendor/gpui-pre-macos/src/gpui_macos.rs
+index bac3cb4..17482fc 100644
+--- a/vendor/gpui-pre-macos/src/gpui_macos.rs
++++ b/vendor/gpui-pre-macos/src/gpui_macos.rs
+@@ -141,3 +141,14 @@ unsafe impl objc::Encode for NSRange {
+ unsafe fn ns_string(string: &str) -> id {
+     unsafe { NSString::alloc(nil).init_str(string).autorelease() }
+ }
++
++/// Whether to use solid backgrounds instead of desktop translucency.
++#[cfg(target_os = "macos")]
++pub fn reduce_transparency() -> bool {
++    use objc::{class, msg_send, sel, sel_impl};
++    unsafe {
++        let workspace: cocoa::base::id = msg_send![class!(NSWorkspace), sharedWorkspace];
++        let enabled: BOOL = msg_send![workspace, accessibilityDisplayShouldReduceTransparency];
++        enabled != NO
++    }
++}
+diff --git a/vendor/gpui-pre/src/window.rs b/vendor/gpui-pre/src/window.rs
+index 59adb8b..b497fd6 100644
+--- a/vendor/gpui-pre/src/window.rs
++++ b/vendor/gpui-pre/src/window.rs
+@@ -2955,6 +2955,11 @@ impl Window {
+         self.platform_window.set_app_id(app_id);
+     }
+
++    /// The platform's current background appearance.
++    pub fn background_appearance(&self) -> WindowBackgroundAppearance {
++        self.platform_window.background_appearance()
++    }
++
+     /// Sets the window background appearance.
+     pub fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {
+         self.platform_window

@@ -2,7 +2,7 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
@@ -85,6 +85,50 @@
           {
             "type": "command",
             "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" SessionEnd",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" PreCompact",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" PostCompact",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" PreToolUse",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{node}\" \"{appHome}/launchers/agent-status/hook.cjs\" StopFailure",
             "timeout": 3
           }
         ]

@@ -16,6 +16,7 @@ Set-StrictMode -Version Latest
 if (-not $IsWindows) { throw 'This snapshot restores the Windows Herdr setup.' }
 
 $repo = $PSScriptRoot
+$platform = Join-Path $repo 'platforms/windows'
 $profileHome = [Environment]::GetFolderPath('UserProfile')
 $programsHome = Join-Path $env:LOCALAPPDATA 'Programs'
 if (-not $AppHome) {
@@ -206,6 +207,10 @@ if ($ValidateMods) {
         foreach ($mod in Get-ChildItem -LiteralPath (Join-Path $repo 'app/mods') -Directory) {
             $testMod = Join-Path $checkHome $mod.Name
             Copy-Item -LiteralPath $mod.FullName -Destination $testMod -Recurse
+            $platformMod = Join-Path $platform "app/mods/$($mod.Name)"
+            if (Test-Path -LiteralPath $platformMod -PathType Container) {
+                Get-ChildItem -LiteralPath $platformMod -File | Copy-Item -Destination $testMod
+            }
             $arguments = 'check "' + $testMod + '"'
             $process = Start-Process -FilePath $AppExe -ArgumentList $arguments -NoNewWindow -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "Herdr rejected mod $($mod.Name), exit $($process.ExitCode)." }
@@ -273,7 +278,7 @@ if ($values['dshProfile']) {
     }
 }
 
-$programTemplate = Read-Object (Join-Path $repo 'config/programs.json')
+$programTemplate = Read-Object (Join-Path $platform 'config/programs.json')
 $requirements = @{
     codex = @('codex')
     'codebuddy-code' = @('node', 'codebuddy')
@@ -307,12 +312,43 @@ foreach ($id in $programTemplate['programs'].Keys) {
 $pending = [System.Collections.Generic.List[object]]::new()
 $appSource = Join-Path $repo 'app'
 foreach ($file in Get-ChildItem -LiteralPath $appSource -File -Recurse) {
-    if ($file.Name -in @('gpui-kit.d.ts', 'jsconfig.json')) { continue }
+    if ($file.Name -in @('gpui-kit.d.ts', 'jsconfig.json', '.DS_Store', 'README.md')) { continue }
     $relative = [IO.Path]::GetRelativePath($appSource, $file.FullName)
+    $destination = Join-Path $AppHome $relative
+    $content = [IO.File]::ReadAllBytes($file.FullName)
+    if (($relative.Replace('\', '/') -eq 'layouts/workspace-folders.json') -and (Test-Path -LiteralPath $destination)) {
+        $layout = Read-Object $file.FullName
+        $current = Read-Object $destination
+        foreach ($field in @('background', 'terminal_opacity')) {
+            if ($current.Contains($field)) { $layout[$field] = $current[$field] }
+        }
+        $sidebar = $current['children'] | Where-Object { $_['id'] -eq 'sidebar' } | Select-Object -First 1
+        $work = $current['children'] | Where-Object { $_['id'] -eq 'work' } | Select-Object -First 1
+        if ($sidebar) {
+            foreach ($field in @('background', 'size')) {
+                if ($sidebar.Contains($field)) { $layout['children'][0][$field] = $sidebar[$field] }
+            }
+        }
+        if ($work) {
+            $body = $work['children'] | Where-Object { $_['id'] -eq 'work-body' } | Select-Object -First 1
+            if ($body) {
+                $main = $body['children'] | Where-Object { $_['id'] -eq 'main' } | Select-Object -First 1
+                if ($main -and $main['content']['pane'] -and $main['content']['pane'].Contains('background')) {
+                    $layout['children'][1]['children'][1]['children'][0]['content']['pane']['background'] = $main['content']['pane']['background']
+                }
+            }
+        }
+        $content = $encoding.GetBytes((Format-Json $layout))
+    }
+    Add-PendingFile $destination "app/$relative" $content
+}
+$platformSource = Join-Path $platform 'app'
+foreach ($file in Get-ChildItem -LiteralPath $platformSource -File -Recurse) {
+    $relative = [IO.Path]::GetRelativePath($platformSource, $file.FullName)
     Add-PendingFile (Join-Path $AppHome $relative) "app/$relative" ([IO.File]::ReadAllBytes($file.FullName))
 }
-Add-PendingJson 'keys.json' (Read-Object (Join-Path $repo 'config/keys.json')) (Join-Path $repo 'baseline/keys.windows.json')
-Add-PendingJson 'settings.json' (Read-Object (Join-Path $repo 'config/settings.json'))
+Add-PendingJson 'keys.json' (Read-Object (Join-Path $platform 'config/keys.json')) (Join-Path $platform 'baseline/keys.windows.json')
+Add-PendingJson 'settings.json' (Read-Object (Join-Path $platform 'config/settings.json'))
 if ($launchers.Count) { Add-PendingJson 'programs.json' ([ordered]@{ programs = $launchers }) }
 
 if ($launchers.Contains('codebuddy-code')) {
@@ -337,7 +373,7 @@ if (-not $SkipCoreShell) {
     $pwsh = Resolve-PowerShell
     if ($pwsh) {
         Write-Host "Resolved 64-bit PowerShell $pwsh"
-        $shellTemplate = Get-Content -LiteralPath (Join-Path $repo 'config/core-shell.json') -Raw | ConvertFrom-Json
+        $shellTemplate = Get-Content -LiteralPath (Join-Path $platform 'config/core-shell.json') -Raw | ConvertFrom-Json
         $shell = @(Expand-Arguments $shellTemplate @{ pwsh = $pwsh })
         $tomlArray = ConvertTo-Json -InputObject $shell -Compress -EscapeHandling Default
         $original = ''

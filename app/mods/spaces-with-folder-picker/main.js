@@ -5,13 +5,13 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
+import { agents, terminals, spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
 
 function newSpace(machine) {
   if (machine) {
     run("space.new", { machine });
   } else if (machine === "") {
-    openOverlay({ mod: "choose-workspace-folder", kind: "dialog", width: 320, props: { machine: "" } });
+    openOverlay({ mod: "choose-workspace-folder", kind: "dialog", width: 390, props: { machine: "" } });
   } else {
     run("mod.open", { name: "choose-workspace-folder" });
   }
@@ -70,6 +70,7 @@ export default class Spaces extends View {
     // Spaces made while this runs wait (at most a moment) for their git, so a
     // worktree appears under its repo instead of jumping there.
     this.shown = new Set(spaces().map((s) => s.id));
+    this.expanded = new Set(JSON.parse(localStorage.getItem("expanded-spaces") ?? "[]"));
     this.born = {};
     this.pressed = null;
     this.over = null;
@@ -301,7 +302,7 @@ export default class Spaces extends View {
       }
       this.ordering.machines = [...moved];
     }
-    return out.filter(r => this.shown.has(r.w.id));
+    return out;
   }
 
   // The rows, under a header per machine once one isn't this computer.
@@ -314,13 +315,17 @@ export default class Spaces extends View {
         bySpace.get(agent.space).push(agent);
       }
     }
+    const reports = new Map(!collapsed ? terminals().map(t => [t.address, t.report]) : []);
     const draw = (r) => {
       if (collapsed) return this.compact(r, t);
       const sessions = bySpace.get(r.w.id);
       if (!sessions?.length) return this.row(r, t);
+      const expanded = this.expanded.has(r.w.id);
       return v_flex().flex_none()
-        .child(this.row(r, t))
-        .children(sessions.map(agent => this.agentRow(agent, r.tree, t)));
+        .child(this.row(r, t, sessions))
+        .child(v_flex().id(`space-sessions-${r.w.id}`).flex_none().h(expanded ? sessions.length * 26 : 0).overflow_hidden()
+          .when(!shared("workspace.reduce-motion"), el => el.transition("height", { duration: 145, easing: "ease-out" }))
+          .children(sessions.map(agent => this.agentRow(agent, r.tree, t, reports.get(agent.address)))));
     };
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
     const loading = m => {
@@ -395,10 +400,12 @@ export default class Spaces extends View {
     const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
     const repo = tree || same(g.name) ? "" : g.name;
     const where = [repo, branch].filter(Boolean).join(" \u00b7 ");
+    if (!where && !g.ahead && !g.behind) return null;
     return h_flex()
-      .flex_1()
+      .flex_none()
+      .max_w(80)
       .min_w(0)
-      .gap(5)
+      .gap(4)
       .justify_end()
       .items_center()
       .text_size(11.5)
@@ -408,8 +415,11 @@ export default class Spaces extends View {
       .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
   }
 
-  row({ w, i, g, tree }, t) {
+  row({ w, i, g, tree }, t, sessions = []) {
+    const blocked = sessions.filter(a => a.status === "blocked").length;
+    const expanded = this.expanded.has(w.id);
     const on = w.active;
+    const git = g ? this.gitTail(g, tree, w.name, t) : null;
     const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
     const colors = shared("space.colors") ?? {};
     const color = colors[w.id] ?? "ansi6";
@@ -424,7 +434,9 @@ export default class Spaces extends View {
       .rounded(8)
       .when(on, (el) => el.bg(t.selected))
       .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
-      .when(this.pressed === w.id && this.over !== w.id, (el) => el.opacity(0.5))
+      .opacity(this.pressed === w.id && this.over !== w.id ? 0.5 : 1)
+      .when(!shared("workspace.reduce-motion"), el => el.transition("opacity", 120))
+      .active(s => s.bg(t.hover))
       .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => el.child(
         div().absolute().left(0).right(0).h(2).bg(t.accent)
           .when(fromIndex < i, line => line.bottom(0))
@@ -460,15 +472,27 @@ export default class Spaces extends View {
           .items_center()
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
           .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
-          .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
+          .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).tooltip(w.folder ? `${w.name} · ${w.folder}` : w.name).child(w.name))
+          .when(Boolean(git), el => el.child(git))
+          .when(blocked > 0, el => el.child(div().flex_none().px(5).rounded(4).bg(t.blocked + "26").text_color(t.blocked).text_size(10).tooltip(`${blocked} need you`).child(String(blocked))))
+          .when(sessions.length > 0, el => el.child(div().id(`expand-${w.id}`).w(20).h(20).flex_none().rounded(4).flex().items_center().justify_center()
+            .cursor_pointer().hover(s => s.bg(t.hover)).tooltip(expanded ? "Hide sessions" : `Show ${sessions.length} sessions`)
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
+            .on_click((_e, cx) => {
+              cx.stop_propagation();
+              if (expanded) this.expanded.delete(w.id); else this.expanded.add(w.id);
+              localStorage.setItem("expanded-spaces", JSON.stringify([...this.expanded])); cx.notify();
+            }).text_color(t.muted).child(expanded ? "▾" : "▸"))),
       );
   }
 
-  agentRow(agent, tree, t) {
+  agentRow(agent, tree, t, report) {
     const program = agent.program;
     const name = agent.tab_name && !/^\d+$/.test(agent.tab_name) ? agent.tab_name : program?.name || agent.address;
-    const status = { blocked: "Needs you", error: "Error", done: "Done", working: "Working", idle: "Idle" }[agent.status] ?? "Unknown";
+    const status = report?.state === "error" ? "Error" : agent.status === "blocked"
+      ? ({ permission: "Approval", question: "Question", auth: "Sign-in" }[report?.kind] ?? "Needs you")
+      : ({ done: "Done", working: report?.msg === "Compacting context" ? "Compacting" : "Working", idle: "Idle" }[agent.status] ?? "Status unknown");
     const icon = program?.icon && (program.tint
       ? svg(program.icon).size(14).flex_none().text_color(t.muted)
       : image(program.icon).size(14).flex_none());
@@ -476,7 +500,8 @@ export default class Spaces extends View {
       .ml(tree ? 45 : 23).pl(7).pr(8).h(26).flex_none().gap(7).items_center()
       .rounded(6).cursor_pointer().hover(s => s.bg(t.hover))
       .when(agent.focused, el => el.bg(t.selected))
-      .tooltip([name, agent.title, status].filter(Boolean).join(" · "))
+      .active(s => s.opacity(0.75))
+      .tooltip([name, agent.title, status, "Open terminal"].filter(Boolean).join(" · "))
       .on_click(() => run("pane.focus", { pane: agent.pane }));
     if (icon) row.child(icon);
     return row.child(div().flex_1().min_w(0).truncate().text_size(12)
